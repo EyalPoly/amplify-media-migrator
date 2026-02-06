@@ -1,11 +1,7 @@
 from dataclasses import dataclass
-from enum import Enum
 from typing import Optional, List
 
-
-class MediaType(Enum):
-    IMAGE = "IMAGE"
-    VIDEO = "VIDEO"
+from ..utils.media import MediaType
 
 
 @dataclass

@@ -1,4 +1,9 @@
-from ..targets.graphql_client import MediaType
+from enum import Enum
+
+
+class MediaType(Enum):
+    IMAGE = "IMAGE"
+    VIDEO = "VIDEO"
 
 
 IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "gif"}
