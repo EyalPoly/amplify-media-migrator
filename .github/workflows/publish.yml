@@ -1,0 +1,128 @@
+name: Publish to PyPI
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+jobs:
+  build-and-publish:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: main
+        token: ${{ secrets.PAT_TOKEN }}
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine
+
+    - name: Check if version bump should be skipped
+      id: check_skip
+      env:
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        BASE_REF: ${{ github.event.pull_request.base.ref }}
+      run: |
+        # Check PR title for [skip bump]
+        if echo "$PR_TITLE" | grep -q "\[skip bump\]"; then
+          echo "skip=true" >> $GITHUB_OUTPUT
+          echo "Skipping version bump (found [skip bump] in PR title)"
+          exit 0
+        fi
+
+        # Check all commits in the PR for [skip bump]
+        MERGE_BASE=$(git merge-base "origin/$BASE_REF" HEAD)
+        if git log "$MERGE_BASE..HEAD" --pretty=%B | grep -q "\[skip bump\]"; then
+          echo "skip=true" >> $GITHUB_OUTPUT
+          echo "Skipping version bump (found [skip bump] in commit messages)"
+        else
+          echo "skip=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Bump version
+      id: bump_version
+      if: steps.check_skip.outputs.skip != 'true'
+      run: |
+        python bump_version.py
+        NEW_VERSION=$(python -c "import re; content=open('setup.py').read(); print(re.search(r'version\s*=\s*[\"\\']([0-9.]+)[\"\\']', content).group(1))")
+        echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "New version: $NEW_VERSION"
+
+    - name: Get current version (if bump skipped)
+      id: current_version
+      if: steps.check_skip.outputs.skip == 'true'
+      run: |
+        CURRENT_VERSION=$(python -c "import re; content=open('setup.py').read(); print(re.search(r'version\s*=\s*[\"\\']([0-9.]+)[\"\\']', content).group(1))")
+        echo "new_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+        echo "Using current version: $CURRENT_VERSION"
+
+    - name: Commit version bump
+      if: steps.check_skip.outputs.skip != 'true'
+      env:
+        NEW_VERSION: ${{ steps.bump_version.outputs.new_version }}
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        git add setup.py
+        git commit -m "Bump version to $NEW_VERSION [skip ci]"
+        git tag "v$NEW_VERSION"
+
+    - name: Create tag for manual version
+      if: steps.check_skip.outputs.skip == 'true'
+      env:
+        CURRENT_VERSION: ${{ steps.current_version.outputs.new_version }}
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        git tag "v$CURRENT_VERSION"
+
+    - name: Push changes
+      uses: ad-m/github-push-action@master
+      with:
+        github_token: ${{ secrets.PAT_TOKEN }}
+        branch: main
+        tags: true
+
+    - name: Build package
+      run: |
+        python -m build
+
+    - name: Check package
+      run: |
+        twine check dist/*
+
+    - name: Publish to PyPI
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      run: |
+        twine upload dist/*
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      env:
+        VERSION: ${{ steps.bump_version.outputs.new_version || steps.current_version.outputs.new_version }}
+      with:
+        tag_name: v${{ env.VERSION }}
+        name: Release v${{ env.VERSION }}
+        body: |
+          Automated release v${{ env.VERSION }}
+
+          Published to PyPI: https://pypi.org/project/amplify-media-migrator/${{ env.VERSION }}/
+        files: |
+          dist/*.whl
+          dist/*.tar.gz
