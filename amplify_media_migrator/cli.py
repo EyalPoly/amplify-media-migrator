@@ -28,7 +28,9 @@ def scan(folder_id: str) -> None:
 @click.option("--folder-id", required=True, help="Google Drive folder ID")
 @click.option("--concurrency", default=10, help="Number of parallel workers")
 @click.option("--dry-run", is_flag=True, help="Validate without uploading")
-@click.option("--skip-existing", is_flag=True, help="Skip files with existing Media records")
+@click.option(
+    "--skip-existing", is_flag=True, help="Skip files with existing Media records"
+)
 @click.option("--verbose", is_flag=True, help="Enable debug logging")
 def migrate(
     folder_id: str,

@@ -51,7 +51,9 @@ class ConfigManager:
     DEFAULT_CONFIG_FILE = "config.json"
 
     def __init__(self, config_path: Optional[Path] = None) -> None:
-        self._config_path = config_path or (self.DEFAULT_CONFIG_DIR / self.DEFAULT_CONFIG_FILE)
+        self._config_path = config_path or (
+            self.DEFAULT_CONFIG_DIR / self.DEFAULT_CONFIG_FILE
+        )
         self._config: Optional[Config] = None
 
     @property

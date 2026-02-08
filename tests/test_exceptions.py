@@ -75,9 +75,7 @@ class TestRateLimitError:
 
 class TestDownloadError:
     def test_message_and_file_info(self):
-        error = DownloadError(
-            "download failed", file_id="abc123", filename="test.jpg"
-        )
+        error = DownloadError("download failed", file_id="abc123", filename="test.jpg")
         assert error.message == "download failed"
         assert error.file_id == "abc123"
         assert error.filename == "test.jpg"
@@ -137,9 +135,7 @@ class TestGraphQLError:
 
 class TestObservationNotFoundError:
     def test_message_and_sequential_id(self):
-        error = ObservationNotFoundError(
-            "observation not found", sequential_id=12345
-        )
+        error = ObservationNotFoundError("observation not found", sequential_id=12345)
         assert error.message == "observation not found"
         assert error.sequential_id == 12345
 
