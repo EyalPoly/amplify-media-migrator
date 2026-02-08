@@ -32,7 +32,7 @@ class TestGetCurrentVersion:
 
     def test_reads_version_in_full_setup_file(self, tmp_path):
         setup_file = tmp_path / "setup.py"
-        content = '''
+        content = """
 from setuptools import setup
 
 setup(
@@ -40,7 +40,7 @@ setup(
     version="3.4.5",
     description="Test package",
 )
-'''
+"""
         setup_file.write_text(content)
 
         assert get_current_version(str(setup_file)) == "3.4.5"
@@ -85,14 +85,14 @@ class TestUpdateVersionInFile:
 
     def test_preserves_surrounding_content(self, tmp_path):
         setup_file = tmp_path / "setup.py"
-        content = '''from setuptools import setup
+        content = """from setuptools import setup
 
 setup(
     name="my-package",
     version="1.0.0",
     description="Test",
 )
-'''
+"""
         setup_file.write_text(content)
 
         update_version_in_file(str(setup_file), "1.0.0", "1.0.1")

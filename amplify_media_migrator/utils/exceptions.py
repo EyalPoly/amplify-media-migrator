@@ -30,9 +30,7 @@ class AuthenticationError(MigratorError):
 class RateLimitError(MigratorError):
     """Raised when API rate limit is exceeded. This error is retryable."""
 
-    def __init__(
-        self, message: str, retry_after: Optional[float] = None
-    ) -> None:
+    def __init__(self, message: str, retry_after: Optional[float] = None) -> None:
         self.retry_after = retry_after
         super().__init__(message)
 

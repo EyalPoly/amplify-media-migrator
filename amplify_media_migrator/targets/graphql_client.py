@@ -32,7 +32,9 @@ class GraphQLClient:
     def connect(self, id_token: str) -> None:
         self._id_token = id_token
 
-    def get_observation_by_sequential_id(self, sequential_id: int) -> Optional[Observation]:
+    def get_observation_by_sequential_id(
+        self, sequential_id: int
+    ) -> Optional[Observation]:
         raise NotImplementedError
 
     def create_media(
