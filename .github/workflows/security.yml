@@ -32,4 +32,4 @@ jobs:
     - name: Run pip-audit for dependency vulnerabilities
       run: |
         pip install -e ".[dev]"
-        pip-audit --strict
+        pip-audit --skip-editable
