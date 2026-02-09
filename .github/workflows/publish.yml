@@ -113,7 +113,7 @@ jobs:
         twine upload dist/*
 
     - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       env:
         VERSION: ${{ steps.bump_version.outputs.new_version || steps.current_version.outputs.new_version }}
       with:
