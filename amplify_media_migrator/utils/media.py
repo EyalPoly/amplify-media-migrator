@@ -1,4 +1,9 @@
-from ..targets.graphql_client import MediaType
+from enum import Enum
+
+
+class MediaType(Enum):
+    IMAGE = "IMAGE"
+    VIDEO = "VIDEO"
 
 
 IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "gif"}
@@ -15,9 +20,21 @@ CONTENT_TYPES = {
 }
 
 
+def _normalize_extension(extension: str) -> str:
+    return extension.lower().lstrip(".")
+
+
 def get_media_type(extension: str) -> MediaType:
-    raise NotImplementedError
+    ext = _normalize_extension(extension)
+    if ext in IMAGE_EXTENSIONS:
+        return MediaType.IMAGE
+    if ext in VIDEO_EXTENSIONS:
+        return MediaType.VIDEO
+    raise ValueError(f"Unknown extension: {extension}")
 
 
 def get_content_type(extension: str) -> str:
-    raise NotImplementedError
+    ext = _normalize_extension(extension)
+    if ext not in CONTENT_TYPES:
+        raise ValueError(f"Unknown extension: {extension}")
+    return CONTENT_TYPES[ext]
