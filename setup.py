@@ -1,7 +1,9 @@
 from setuptools import setup, find_packages
 
 with open("requirements.txt") as f:
-    requirements = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+    requirements = [
+        line.strip() for line in f if line.strip() and not line.startswith("#")
+    ]
 
 dev_requirements = [
     "pytest>=7.4.0",
