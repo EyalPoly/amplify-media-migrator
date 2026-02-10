@@ -1,5 +1,8 @@
+import json
+
 import click
-from typing import Optional
+
+from .config import ConfigManager, ConfigurationError, config_to_dict
 
 
 @click.group()
@@ -10,17 +13,67 @@ def main() -> None:
 
 @main.command()
 def config() -> None:
-    raise NotImplementedError
+    mgr = ConfigManager()
+
+    if mgr.exists():
+        click.echo(f"Configuration file found: {mgr.config_path}")
+        if not click.confirm("Overwrite existing configuration?", default=False):
+            click.echo("Aborted.")
+            return
+        mgr.load()
+    else:
+        click.echo("No configuration file found. Creating a new one.")
+
+    click.echo("\n--- Google Drive ---")
+    mgr.get_or_prompt("google_drive.folder_id", "Google Drive folder ID")
+    mgr.get_or_prompt(
+        "google_drive.credentials_path", "Path to Google credentials JSON"
+    )
+    mgr.get_or_prompt("google_drive.token_path", "Path to Google token JSON")
+
+    click.echo("\n--- AWS ---")
+    mgr.get_or_prompt("aws.region", "AWS region")
+    mgr.get_or_prompt("aws.cognito.user_pool_id", "Cognito User Pool ID")
+    mgr.get_or_prompt("aws.cognito.client_id", "Cognito Client ID")
+    mgr.get_or_prompt("aws.cognito.username", "Cognito username (email)")
+
+    click.echo("\n--- Amplify ---")
+    mgr.get_or_prompt("aws.amplify.api_endpoint", "AppSync API endpoint URL")
+    mgr.get_or_prompt("aws.amplify.storage_bucket", "S3 storage bucket name")
+
+    try:
+        mgr.config.validate()
+    except ConfigurationError as e:
+        click.echo(f"\nValidation error: {e}", err=True)
+        raise SystemExit(1)
+
+    mgr.save()
+    click.echo(f"\nConfiguration saved to {mgr.config_path}")
 
 
 @main.command()
 def show() -> None:
-    raise NotImplementedError
+    mgr = ConfigManager()
+
+    if not mgr.exists():
+        click.echo(f"No configuration file found at {mgr.config_path}")
+        click.echo("Run 'amplify-media-migrator config' to create one.")
+        raise SystemExit(1)
+
+    try:
+        cfg = mgr.load()
+    except ConfigurationError as e:
+        click.echo(f"Error loading configuration: {e}", err=True)
+        raise SystemExit(1)
+
+    click.echo(f"Configuration file: {mgr.config_path}\n")
+    click.echo(json.dumps(config_to_dict(cfg), indent=2))
 
 
 @main.command()
 @click.option("--folder-id", required=True, help="Google Drive folder ID")
 def scan(folder_id: str) -> None:
+    """Scan Google Drive folder and validate file mappings (dry-run)."""
     raise NotImplementedError
 
 
