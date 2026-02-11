@@ -1,8 +1,10 @@
 import json
+from pathlib import Path
 
 import click
 
 from .config import ConfigManager, ConfigurationError, config_to_dict
+from .migration.progress import FileStatus, ProgressTracker
 
 
 @click.group()
@@ -101,11 +103,28 @@ def resume() -> None:
 
 
 @main.command()
-def review() -> None:
-    raise NotImplementedError
+@click.option("--folder-id", required=True, help="Google Drive folder ID")
+def review(folder_id: str) -> None:
+    """Show files that need manual review."""
+    tracker = ProgressTracker()
+    if not tracker.load(folder_id):
+        click.echo(f"No progress file found for folder {folder_id}")
+        raise SystemExit(1)
+
+    files = tracker.get_files_by_status(FileStatus.NEEDS_REVIEW)
+    if not files:
+        click.echo("No files need review.")
+        return
+
+    click.echo(f"Files needing review: {len(files)}\n")
+    for fp in files:
+        click.echo(f"  {fp.filename}")
+        if fp.error:
+            click.echo(f"    Reason: {fp.error}")
 
 
 @main.command()
+@click.option("--folder-id", required=True, help="Google Drive folder ID")
 @click.option(
     "--status",
     type=click.Choice(["needs_review", "orphan", "failed", "partial"]),
@@ -113,8 +132,16 @@ def review() -> None:
     help="Status of files to export",
 )
 @click.option("--output", required=True, help="Output file path")
-def export(status: str, output: str) -> None:
-    raise NotImplementedError
+def export(folder_id: str, status: str, output: str) -> None:
+    """Export files with a given status to a JSON file."""
+    tracker = ProgressTracker()
+    if not tracker.load(folder_id):
+        click.echo(f"No progress file found for folder {folder_id}")
+        raise SystemExit(1)
+
+    file_status = FileStatus(status)
+    count = tracker.export_to_json(file_status, Path(output))
+    click.echo(f"Exported {count} files with status '{status}' to {output}")
 
 
 if __name__ == "__main__":

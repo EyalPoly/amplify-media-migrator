@@ -212,7 +212,10 @@ class ConfigManager:
 
     def get(self, key: str, default: Any = None) -> Any:
         if self._config is None:
-            self.load()
+            try:
+                self.load()
+            except ConfigurationError:
+                self._config = Config()
         segments = key.split(".")
         obj: Any = self._config
         for segment in segments:
