@@ -36,7 +36,9 @@ class TestProgressTrackerSaveLoad:
     def test_save_and_reload(self, tracker: ProgressTracker) -> None:
         tracker.load("folder1")
         tracker.set_total_files(100)
-        tracker.update_file("f1", "12345.jpg", FileStatus.COMPLETED, sequential_ids=[12345])
+        tracker.update_file(
+            "f1", "12345.jpg", FileStatus.COMPLETED, sequential_ids=[12345]
+        )
         tracker.save()
 
         tracker2 = ProgressTracker(progress_dir=tracker._progress_dir)

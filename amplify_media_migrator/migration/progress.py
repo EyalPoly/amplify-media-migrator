@@ -233,9 +233,7 @@ class ProgressTracker:
             for fid, fp in self._files.items()
             if fp.status == status
         }
-        output_path.write_text(
-            json.dumps(matching, indent=2) + "\n", encoding="utf-8"
-        )
+        output_path.write_text(json.dumps(matching, indent=2) + "\n", encoding="utf-8")
         return len(matching)
 
     def _build_summary_dict(self) -> Dict[str, int]:

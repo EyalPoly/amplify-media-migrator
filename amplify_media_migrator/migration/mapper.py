@@ -26,9 +26,7 @@ _SINGLE_RE = re.compile(r"^(\d+)\.(jpg|jpeg|png|gif|mp4|mov|avi)$", re.IGNORECAS
 _MULTIPLE_RE = re.compile(
     r"^(\d+)[a-zA-Z]\.(jpg|jpeg|png|gif|mp4|mov|avi)$", re.IGNORECASE
 )
-_RANGE_RE = re.compile(
-    r"^(\d+)-(\d+)\.(jpg|jpeg|png|gif|mp4|mov|avi)$", re.IGNORECASE
-)
+_RANGE_RE = re.compile(r"^(\d+)-(\d+)\.(jpg|jpeg|png|gif|mp4|mov|avi)$", re.IGNORECASE)
 
 
 class FilenameMapper:
