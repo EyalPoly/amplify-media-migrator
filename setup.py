@@ -1,9 +1,17 @@
 from setuptools import setup, find_packages
 
-with open("requirements.txt") as f:
-    requirements = [
-        line.strip() for line in f if line.strip() and not line.startswith("#")
-    ]
+requirements = [
+    "click>=8.1.0",
+    "boto3>=1.34.0",
+    "google-api-python-client>=2.0.0",
+    "google-auth-httplib2>=0.2.0",
+    "google-auth-oauthlib>=1.0.0",
+    "gql[requests]>=3.5.0",
+    "requests>=2.31.0",
+    "python-dateutil>=2.8.0",
+    "rich>=13.7.0",
+    "tqdm>=4.66.0",
+]
 
 dev_requirements = [
     "pytest>=7.4.0",
