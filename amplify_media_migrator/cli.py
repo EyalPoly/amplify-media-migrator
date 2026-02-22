@@ -37,6 +37,7 @@ def config() -> None:
     mgr.get_or_prompt("aws.region", "AWS region")
     mgr.get_or_prompt("aws.cognito.user_pool_id", "Cognito User Pool ID")
     mgr.get_or_prompt("aws.cognito.client_id", "Cognito Client ID")
+    mgr.get_or_prompt("aws.cognito.identity_pool_id", "Cognito Identity Pool ID")
     mgr.get_or_prompt("aws.cognito.username", "Cognito username (email)")
 
     click.echo("\n--- Amplify ---")

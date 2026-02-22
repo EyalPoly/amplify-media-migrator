@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Any, NoReturn, Optional
+from typing import Any, Callable, NoReturn, Optional
 
 import boto3
 from boto3.s3.transfer import TransferConfig
@@ -116,6 +116,7 @@ class AmplifyStorageClient:
         key: str,
         content_type: str,
         chunk_size_mb: int = 8,
+        progress_callback: Optional[Callable[[int], None]] = None,
     ) -> str:
         s3 = self._ensure_connected()
         config = TransferConfig(
@@ -129,6 +130,7 @@ class AmplifyStorageClient:
                 key,
                 ExtraArgs={"ContentType": content_type},
                 Config=config,
+                Callback=progress_callback,
             )
         except ClientError as e:
             self._handle_client_error(e, key=key, bucket=self._bucket)

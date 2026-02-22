@@ -10,6 +10,8 @@ from amplify_media_migrator.utils.exceptions import (
     UploadError,
 )
 
+pytestmark = pytest.mark.unit
+
 BUCKET = "test-media-bucket"
 REGION = "us-east-1"
 IDENTITY_POOL_ID = "us-east-1:test-identity-pool-id"
@@ -253,10 +255,31 @@ class TestUploadFileMultipart:
             "media/obs-1/video.mp4",
             ExtraArgs={"ContentType": "video/mp4"},
             Config=mock_config,
+            Callback=None,
         )
         assert (
             url == f"https://{BUCKET}.s3.{REGION}.amazonaws.com/media/obs-1/video.mp4"
         )
+
+    def test_passes_progress_callback(
+        self,
+        connected_client: AmplifyStorageClient,
+        mock_s3: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        file_path = tmp_path / "video.mp4"
+        file_path.write_bytes(b"video data")
+        callback = MagicMock()
+
+        connected_client.upload_file_multipart(
+            file_path=file_path,
+            key="media/obs-1/video.mp4",
+            content_type="video/mp4",
+            progress_callback=callback,
+        )
+
+        call_kwargs = mock_s3.upload_file.call_args[1]
+        assert call_kwargs["Callback"] is callback
 
     def test_client_error_raises_upload_error(
         self,
