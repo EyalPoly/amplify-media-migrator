@@ -25,6 +25,7 @@ class GoogleDriveConfig:
 class CognitoConfig:
     user_pool_id: str = ""
     client_id: str = ""
+    identity_pool_id: str = ""
     username: str = ""
 
 
@@ -98,6 +99,7 @@ def config_from_dict(data: dict) -> Config:
     cognito = CognitoConfig(
         user_pool_id=cognito_data.get("user_pool_id", ""),
         client_id=cognito_data.get("client_id", ""),
+        identity_pool_id=cognito_data.get("identity_pool_id", ""),
         username=cognito_data.get("username", ""),
     )
 
