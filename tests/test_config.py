@@ -34,6 +34,7 @@ def sample_config_dict():
             "cognito": {
                 "user_pool_id": "eu-west-1_TestPool",
                 "client_id": "test_client_id",
+                "identity_pool_id": "eu-west-1:test-identity-pool-id",
                 "username": "test@example.com",
             },
             "amplify": {
