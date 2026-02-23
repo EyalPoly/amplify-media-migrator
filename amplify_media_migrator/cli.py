@@ -1,10 +1,23 @@
+import asyncio
 import json
+import logging
 from pathlib import Path
+from typing import Any, Callable
 
 import click
 
+from .auth.google_drive import GoogleDriveAuthProvider
 from .config import ConfigManager, ConfigurationError, config_to_dict
+from .migration.engine import MigrationEngine
+from .migration.mapper import FilenameMapper
 from .migration.progress import FileStatus, ProgressTracker
+from .sources.google_drive import GoogleDriveClient
+from .targets.amplify_storage import AmplifyStorageClient
+from .targets.graphql_client import GraphQLClient
+from .utils.exceptions import AuthenticationError, MigratorError
+from .utils.logger import setup_logging
+
+logger = logging.getLogger(__name__)
 
 
 @click.group()
@@ -73,11 +86,169 @@ def show() -> None:
     click.echo(json.dumps(config_to_dict(cfg), indent=2))
 
 
+def _load_config() -> ConfigManager:
+    mgr = ConfigManager()
+    if not mgr.exists():
+        click.echo("No configuration found. Run 'amplify-media-migrator config' first.")
+        raise SystemExit(1)
+    try:
+        mgr.load()
+    except ConfigurationError as e:
+        click.echo(f"Configuration error: {e}", err=True)
+        raise SystemExit(1)
+    return mgr
+
+
+def _authenticate_google(cfg: ConfigManager) -> GoogleDriveClient:
+    creds_path = Path(cfg.get("google_drive.credentials_path")).expanduser()
+    token_path = Path(cfg.get("google_drive.token_path")).expanduser()
+
+    auth_provider = GoogleDriveAuthProvider(
+        credentials_path=creds_path,
+        token_path=token_path,
+    )
+
+    click.echo("Authenticating with Google Drive...")
+    if not auth_provider.authenticate():
+        click.echo("Google Drive authentication failed.", err=True)
+        raise SystemExit(1)
+
+    credentials = auth_provider.get_credentials()
+    drive_client = GoogleDriveClient(credentials=credentials)
+    drive_client.connect()
+    return drive_client
+
+
+def _authenticate_cognito(cfg: ConfigManager) -> str:
+    from amplify_auth import CognitoAuthProvider
+
+    cognito = CognitoAuthProvider(
+        user_pool_id=cfg.get("aws.cognito.user_pool_id"),
+        client_id=cfg.get("aws.cognito.client_id"),
+        region=cfg.get("aws.region"),
+    )
+
+    username = cfg.get("aws.cognito.username")
+    password = click.prompt("Cognito password", hide_input=True)
+
+    click.echo("Authenticating with AWS Cognito...")
+    if not cognito.authenticate(username, password):
+        click.echo("Cognito authentication failed.", err=True)
+        raise SystemExit(1)
+
+    id_token: str = cognito.get_id_token() or ""
+    if not id_token:
+        click.echo("Failed to obtain ID token.", err=True)
+        raise SystemExit(1)
+
+    return id_token
+
+
+def _create_engine(
+    cfg: ConfigManager,
+    drive_client: GoogleDriveClient,
+    id_token: str,
+    concurrency: int = 10,
+) -> MigrationEngine:
+    storage_client = AmplifyStorageClient(
+        bucket=cfg.get("aws.amplify.storage_bucket"),
+        region=cfg.get("aws.region"),
+        identity_pool_id=cfg.get("aws.cognito.identity_pool_id"),
+        user_pool_id=cfg.get("aws.cognito.user_pool_id"),
+    )
+    storage_client.connect(id_token)
+
+    graphql_client = GraphQLClient(
+        api_endpoint=cfg.get("aws.amplify.api_endpoint"),
+        region=cfg.get("aws.region"),
+    )
+    graphql_client.connect(id_token)
+
+    migration_cfg = cfg.config.migration
+
+    return MigrationEngine(
+        drive_client=drive_client,
+        storage_client=storage_client,
+        graphql_client=graphql_client,
+        progress_tracker=ProgressTracker(),
+        mapper=FilenameMapper(),
+        concurrency=concurrency,
+        retry_attempts=migration_cfg.retry_attempts,
+        retry_delay_seconds=migration_cfg.retry_delay_seconds,
+        default_media_public=migration_cfg.default_media_public,
+    )
+
+
+def _run_with_progress(
+    coro_fn: Callable[[], Any],
+    engine: MigrationEngine,
+    desc: str = "Processing",
+) -> None:
+    try:
+        from tqdm import tqdm
+
+        progress_bar = tqdm(desc=desc, unit="file")
+
+        def on_progress(filename: str, status: FileStatus) -> None:
+            progress_bar.update(1)
+            progress_bar.set_postfix_str(f"{filename}: {status.value}")
+
+        engine.set_progress_callback(on_progress)
+
+        try:
+            asyncio.run(coro_fn())
+        finally:
+            progress_bar.close()
+
+    except ImportError:
+        asyncio.run(coro_fn())
+
+
+def _print_summary(summary: dict) -> None:
+    click.echo("\n--- Migration Summary ---")
+    click.echo(f"  Total files:    {summary['total']}")
+    click.echo(f"  Completed:      {summary['completed']}")
+    click.echo(f"  Failed:         {summary['failed']}")
+    click.echo(f"  Orphan:         {summary['orphan']}")
+    click.echo(f"  Needs review:   {summary['needs_review']}")
+    click.echo(f"  Partial:        {summary['partial']}")
+    click.echo(f"  Pending:        {summary['pending']}")
+
+
 @main.command()
 @click.option("--folder-id", required=True, help="Google Drive folder ID")
 def scan(folder_id: str) -> None:
     """Scan Google Drive folder and validate file mappings (dry-run)."""
-    raise NotImplementedError
+    cfg = _load_config()
+    drive_client = _authenticate_google(cfg)
+
+    click.echo(f"\nScanning folder {folder_id}...")
+
+    engine = MigrationEngine(
+        drive_client=drive_client,
+        storage_client=AmplifyStorageClient(
+            bucket=cfg.get("aws.amplify.storage_bucket"),
+            region=cfg.get("aws.region"),
+        ),
+        graphql_client=GraphQLClient(
+            api_endpoint=cfg.get("aws.amplify.api_endpoint"),
+            region=cfg.get("aws.region"),
+        ),
+        progress_tracker=ProgressTracker(),
+        mapper=FilenameMapper(),
+    )
+
+    pattern_counts = asyncio.run(engine.scan(folder_id))
+
+    total = sum(pattern_counts.values())
+    click.echo(f"\nScan complete. {total} files found.\n")
+    click.echo("Pattern breakdown:")
+    click.echo(f"  Single:    {pattern_counts.get('single', 0)}")
+    click.echo(f"  Multiple:  {pattern_counts.get('multiple', 0)}")
+    click.echo(f"  Range:     {pattern_counts.get('range', 0)}")
+    click.echo(f"  Invalid:   {pattern_counts.get('invalid', 0)}")
+
+    _print_summary(engine.get_summary())
 
 
 @main.command()
@@ -95,12 +266,62 @@ def migrate(
     skip_existing: bool,
     verbose: bool,
 ) -> None:
-    raise NotImplementedError
+    """Run the full media migration."""
+    if verbose:
+        setup_logging(level="DEBUG")
+
+    cfg = _load_config()
+    drive_client = _authenticate_google(cfg)
+    id_token = _authenticate_cognito(cfg)
+    engine = _create_engine(cfg, drive_client, id_token, concurrency)
+
+    if dry_run:
+        click.echo("\n[DRY RUN] No files will be downloaded or uploaded.\n")
+
+    click.echo(f"Starting migration for folder {folder_id}...")
+
+    _run_with_progress(
+        lambda: engine.migrate(folder_id, dry_run, skip_existing),
+        engine,
+        desc="Migrating",
+    )
+
+    _print_summary(engine.get_summary())
 
 
 @main.command()
-def resume() -> None:
-    raise NotImplementedError
+@click.option("--folder-id", required=True, help="Google Drive folder ID")
+@click.option("--concurrency", default=10, help="Number of parallel workers")
+@click.option("--dry-run", is_flag=True, help="Validate without uploading")
+@click.option(
+    "--skip-existing", is_flag=True, help="Skip files with existing Media records"
+)
+@click.option("--verbose", is_flag=True, help="Enable debug logging")
+def resume(
+    folder_id: str,
+    concurrency: int,
+    dry_run: bool,
+    skip_existing: bool,
+    verbose: bool,
+) -> None:
+    """Resume an interrupted migration."""
+    if verbose:
+        setup_logging(level="DEBUG")
+
+    cfg = _load_config()
+    drive_client = _authenticate_google(cfg)
+    id_token = _authenticate_cognito(cfg)
+    engine = _create_engine(cfg, drive_client, id_token, concurrency)
+
+    click.echo(f"Resuming migration for folder {folder_id}...")
+
+    _run_with_progress(
+        lambda: engine.resume(folder_id, dry_run, skip_existing),
+        engine,
+        desc="Resuming",
+    )
+
+    _print_summary(engine.get_summary())
 
 
 @main.command()
