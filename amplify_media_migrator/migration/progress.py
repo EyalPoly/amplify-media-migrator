@@ -189,8 +189,7 @@ class ProgressTracker:
                 existing.s3_url = s3_url
             if media_ids is not None:
                 existing.media_ids = media_ids
-            if error is not None:
-                existing.error = error
+            existing.error = error
             existing.updated_at = datetime.now(timezone.utc)
         else:
             self._files[file_id] = FileProgress(
@@ -225,6 +224,11 @@ class ProgressTracker:
     def get_failed_file_ids(self) -> List[str]:
         return [
             fid for fid, fp in self._files.items() if fp.status == FileStatus.FAILED
+        ]
+
+    def get_partial_file_ids(self) -> List[str]:
+        return [
+            fid for fid, fp in self._files.items() if fp.status == FileStatus.PARTIAL
         ]
 
     def export_to_json(self, status: FileStatus, output_path: Path) -> int:
