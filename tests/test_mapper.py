@@ -3,6 +3,7 @@ import pytest
 from amplify_media_migrator.migration.mapper import (
     FilenameMapper,
     FilenamePattern,
+    ParsedFilename,
 )
 
 
@@ -142,7 +143,76 @@ class TestIsValidExtension:
         assert mapper.is_valid_extension("txt") is False
 
 
+class TestOriginalFilename:
+    def test_single_preserves_original(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("6602.JPG")
+        assert result.original_filename == "6602.JPG"
+
+    def test_multiple_preserves_original(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("6602a.MOV")
+        assert result.original_filename == "6602a.MOV"
+
+    def test_range_preserves_original(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("6000-6001.jpg")
+        assert result.original_filename == "6000-6001.jpg"
+
+    def test_invalid_preserves_original(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("bad_file.pdf")
+        assert result.original_filename == "bad_file.pdf"
+
+
+class TestInvalidErrorMessages:
+    def test_valid_ext_invalid_name(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("photo.jpg")
+        assert result.pattern == FilenamePattern.INVALID
+        assert result.error == "Filename does not match any valid pattern"
+        assert result.extension == "jpg"
+
+    def test_no_extension_error(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("noext")
+        assert result.error == "Missing file extension"
+        assert result.extension == ""
+
+    def test_unsupported_ext_error(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("6602.bmp")
+        assert result.error == "Unsupported extension: bmp"
+        assert result.extension == "bmp"
+
+
+class TestParsedFilenameDataclass:
+    def test_default_error_is_none(self) -> None:
+        pf = ParsedFilename(
+            pattern=FilenamePattern.SINGLE,
+            sequential_ids=[1],
+            extension="jpg",
+            original_filename="1.jpg",
+        )
+        assert pf.error is None
+
+    def test_all_fields_set(self) -> None:
+        pf = ParsedFilename(
+            pattern=FilenamePattern.INVALID,
+            sequential_ids=[],
+            extension="txt",
+            original_filename="bad.txt",
+            error="Unsupported extension: txt",
+        )
+        assert pf.pattern == FilenamePattern.INVALID
+        assert pf.sequential_ids == []
+        assert pf.extension == "txt"
+        assert pf.original_filename == "bad.txt"
+        assert pf.error == "Unsupported extension: txt"
+
+
 class TestBuildS3Key:
     def test_basic(self, mapper: FilenameMapper) -> None:
         key = mapper.build_s3_key("abc-123", "12345.jpg")
         assert key == "media/abc-123/12345.jpg"
+
+    def test_range_filename(self, mapper: FilenameMapper) -> None:
+        key = mapper.build_s3_key("obs-abc", "6000-6001.jpg")
+        assert key == "media/obs-abc/6000-6001.jpg"
+
+    def test_multiple_filename(self, mapper: FilenameMapper) -> None:
+        key = mapper.build_s3_key("obs-def", "6602a.jpg")
+        assert key == "media/obs-def/6602a.jpg"

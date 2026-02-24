@@ -1,0 +1,108 @@
+{
+  "folder_id": "1ABC_test_folder",
+  "started_at": "2026-01-25T10:00:00+00:00",
+  "updated_at": "2026-01-25T12:30:00+00:00",
+  "total_files": 9,
+  "files": {
+    "file-single-1": {
+      "filename": "6602.jpg",
+      "status": "completed",
+      "sequential_ids": [6602],
+      "observation_ids": ["obs-abc-123"],
+      "s3_url": "https://bucket.s3.us-east-1.amazonaws.com/media/obs-abc-123/6602.jpg",
+      "media_ids": ["media-xyz-456"],
+      "error": null,
+      "updated_at": "2026-01-25T10:05:00+00:00"
+    },
+    "file-range-1": {
+      "filename": "6000-6001.jpg",
+      "status": "completed",
+      "sequential_ids": [6000, 6001],
+      "observation_ids": ["obs-ghi-789", "obs-jkl-012"],
+      "s3_url": "https://bucket.s3.us-east-1.amazonaws.com/media/obs-ghi-789/6000-6001.jpg",
+      "media_ids": ["media-range-1", "media-range-2"],
+      "error": null,
+      "updated_at": "2026-01-25T10:10:00+00:00"
+    },
+    "file-orphan-1": {
+      "filename": "99999.jpg",
+      "status": "orphan",
+      "sequential_ids": [99999],
+      "observation_ids": [],
+      "s3_url": null,
+      "media_ids": [],
+      "error": "No matching observations found",
+      "updated_at": "2026-01-25T10:15:00+00:00"
+    },
+    "file-failed-1": {
+      "filename": "8888.jpg",
+      "status": "failed",
+      "sequential_ids": [8888],
+      "observation_ids": [],
+      "s3_url": null,
+      "media_ids": [],
+      "error": "Download failed: Network error",
+      "updated_at": "2026-01-25T10:20:00+00:00"
+    },
+    "file-review-1": {
+      "filename": "bad_name.pdf",
+      "status": "needs_review",
+      "sequential_ids": [],
+      "observation_ids": [],
+      "s3_url": null,
+      "media_ids": [],
+      "error": "Unsupported extension: pdf",
+      "updated_at": "2026-01-25T10:25:00+00:00"
+    },
+    "file-partial-1": {
+      "filename": "5000-5002.jpg",
+      "status": "partial",
+      "sequential_ids": [5000, 5001, 5002],
+      "observation_ids": ["obs-5000", "obs-5001"],
+      "s3_url": "https://bucket.s3.us-east-1.amazonaws.com/media/obs-5000/5000-5002.jpg",
+      "media_ids": ["media-5000", "media-5001"],
+      "error": "Failed for sequential IDs: [5002]",
+      "updated_at": "2026-01-25T10:30:00+00:00"
+    },
+    "file-pending-1": {
+      "filename": "7777.jpg",
+      "status": "pending",
+      "sequential_ids": [7777],
+      "observation_ids": [],
+      "s3_url": null,
+      "media_ids": [],
+      "error": null,
+      "updated_at": "2026-01-25T10:35:00+00:00"
+    },
+    "file-downloaded-1": {
+      "filename": "8000.jpg",
+      "status": "downloaded",
+      "sequential_ids": [8000],
+      "observation_ids": [],
+      "s3_url": null,
+      "media_ids": [],
+      "error": null,
+      "updated_at": "2026-01-25T10:40:00+00:00"
+    },
+    "file-uploaded-1": {
+      "filename": "8001.jpg",
+      "status": "uploaded",
+      "sequential_ids": [8001],
+      "observation_ids": [],
+      "s3_url": "https://bucket.s3.us-east-1.amazonaws.com/media/obs-8001/8001.jpg",
+      "media_ids": [],
+      "error": null,
+      "updated_at": "2026-01-25T10:45:00+00:00"
+    }
+  },
+  "summary": {
+    "pending": 1,
+    "downloaded": 1,
+    "uploaded": 1,
+    "completed": 2,
+    "failed": 1,
+    "orphan": 1,
+    "needs_review": 1,
+    "partial": 1
+  }
+}

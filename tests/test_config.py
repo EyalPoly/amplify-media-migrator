@@ -423,6 +423,38 @@ class TestConfigManagerPrompts:
             mock_prompt.assert_called_once_with("Enter client ID", hide_input=True)
 
 
+class TestConfigManagerEdgeCases:
+    def test_save_with_no_config_creates_default(self, tmp_path):
+        path = tmp_path / "new_config.json"
+        mgr = ConfigManager(config_path=path)
+        mgr.save()
+        assert path.exists()
+        data = json.loads(path.read_text())
+        assert data["migration"]["concurrency"] == 10
+
+    def test_get_without_loaded_config_falls_back(self, tmp_path):
+        path = tmp_path / "missing.json"
+        mgr = ConfigManager(config_path=path)
+        result = mgr.get("migration.concurrency")
+        assert result == 10
+
+    def test_set_without_loaded_config_falls_back(self, tmp_path):
+        path = tmp_path / "missing.json"
+        mgr = ConfigManager(config_path=path)
+        mgr.set("migration.concurrency", 42)
+        assert mgr.get("migration.concurrency") == 42
+
+    def test_set_invalid_segment_raises(self, manager):
+        manager.load()
+        with pytest.raises(ConfigurationError, match="unknown segment"):
+            manager.set("aws.nonexistent.value", "x")
+
+    def test_set_invalid_final_segment_raises(self, manager):
+        manager.load()
+        with pytest.raises(ConfigurationError, match="unknown segment"):
+            manager.set("aws.nonexistent_field", "x")
+
+
 class TestConfigManagerProperties:
     def test_config_path_returns_path(self, config_file):
         mgr = ConfigManager(config_path=config_file)
