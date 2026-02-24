@@ -1,0 +1,75 @@
+{
+  "single_match": {
+    "query": "listObservations(filter: { sequentialId: { eq: 6602 } })",
+    "response": {
+      "data": {
+        "listObservations": {
+          "items": [
+            {
+              "id": "obs-abc-123",
+              "sequentialId": 6602
+            }
+          ]
+        }
+      }
+    }
+  },
+  "range_match": {
+    "query_ids": [6000, 6001],
+    "responses": {
+      "6000": {
+        "data": {
+          "listObservations": {
+            "items": [
+              {
+                "id": "obs-ghi-789",
+                "sequentialId": 6000
+              }
+            ]
+          }
+        }
+      },
+      "6001": {
+        "data": {
+          "listObservations": {
+            "items": [
+              {
+                "id": "obs-jkl-012",
+                "sequentialId": 6001
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "not_found": {
+    "query": "listObservations(filter: { sequentialId: { eq: 99999 } })",
+    "response": {
+      "data": {
+        "listObservations": {
+          "items": []
+        }
+      }
+    }
+  },
+  "create_media": {
+    "input": {
+      "url": "https://bucket.s3.us-east-1.amazonaws.com/media/obs-abc-123/6602.jpg",
+      "observationId": "obs-abc-123",
+      "type": "IMAGE",
+      "isAvailableForPublicUse": false
+    },
+    "response": {
+      "data": {
+        "createMedia": {
+          "id": "media-xyz-456",
+          "url": "https://bucket.s3.us-east-1.amazonaws.com/media/obs-abc-123/6602.jpg",
+          "observationId": "obs-abc-123",
+          "type": "IMAGE",
+          "isAvailableForPublicUse": false
+        }
+      }
+    }
+  }
+}

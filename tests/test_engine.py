@@ -122,7 +122,7 @@ class TestScan:
             _drive_file("f1", "6602.jpg"),
             _drive_file("f2", "6603a.jpg"),
         ]
-        result = asyncio.get_event_loop().run_until_complete(engine.scan("folder-1"))
+        result = asyncio.run(engine.scan("folder-1"))
 
         assert result["single"] == 1
         assert result["multiple"] == 1
@@ -139,7 +139,7 @@ class TestScan:
         drive_client.list_files.return_value = [
             _drive_file("f1", "bad.txt"),
         ]
-        result = asyncio.get_event_loop().run_until_complete(engine.scan("folder-1"))
+        result = asyncio.run(engine.scan("folder-1"))
 
         assert result["invalid"] == 1
         assert progress.files["f1"].status == FileStatus.NEEDS_REVIEW
@@ -153,7 +153,7 @@ class TestScan:
         drive_client.list_files.return_value = [
             _drive_file("f1", "6000-6001.jpg"),
         ]
-        result = asyncio.get_event_loop().run_until_complete(engine.scan("folder-1"))
+        result = asyncio.run(engine.scan("folder-1"))
 
         assert result["range"] == 1
         assert progress.files["f1"].sequential_ids == [6000, 6001]
@@ -174,7 +174,7 @@ class TestScan:
             status=FileStatus.COMPLETED,
         )
         progress.save()
-        asyncio.get_event_loop().run_until_complete(engine.scan("folder-1"))
+        asyncio.run(engine.scan("folder-1"))
 
         assert progress.files["f1"].status == FileStatus.COMPLETED
 
@@ -200,7 +200,7 @@ class TestProcessFileSingle:
         )
         graphql_client.create_media.return_value = media
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         drive_client.download_file.assert_called_once_with("f1")
         storage_client.upload_file.assert_called_once_with(
@@ -242,7 +242,7 @@ class TestProcessFileSingle:
         )
         graphql_client.create_media.return_value = media
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         graphql_client.create_media.assert_called_once_with(
             "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/6602.mp4",
@@ -273,7 +273,7 @@ class TestProcessFileMultiple:
         )
         graphql_client.create_media.return_value = media
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         storage_client.upload_file.assert_called_once_with(
             b"photo bytes", "media/obs-1/6602a.jpg", "image/jpeg"
@@ -308,7 +308,7 @@ class TestProcessFileRange:
             _media("m-b", obs_id="obs-b"),
         ]
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         assert graphql_client.create_media.call_count == 2
         storage_client.upload_file.assert_called_once()
@@ -344,7 +344,7 @@ class TestProcessFileRange:
             GraphQLError("Server error", operation="CreateMedia"),
         ]
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         fp = progress.files["f1"]
         assert fp.status == FileStatus.PARTIAL
@@ -369,7 +369,7 @@ class TestProcessFileRange:
         )
         graphql_client.create_media.return_value = _media("m-a", obs_id="obs-a")
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         fp = progress.files["f1"]
         assert fp.status == FileStatus.COMPLETED
@@ -385,7 +385,7 @@ class TestProcessFileInvalid:
         progress.load("folder-1")
         file = _drive_file("f1", "bad_name.txt")
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         assert progress.files["f1"].status == FileStatus.NEEDS_REVIEW
 
@@ -401,7 +401,7 @@ class TestProcessFileOrphan:
         file = _drive_file("f1", "99999.jpg")
         graphql_client.get_observations_by_sequential_ids.return_value = {}
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         fp = progress.files["f1"]
         assert fp.status == FileStatus.ORPHAN
@@ -423,9 +423,7 @@ class TestDryRun:
 
         graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
 
-        asyncio.get_event_loop().run_until_complete(
-            engine.process_file(file, dry_run=True)
-        )
+        asyncio.run(engine.process_file(file, dry_run=True))
 
         drive_client.download_file.assert_not_called()
         storage_client.upload_file.assert_not_called()
@@ -451,9 +449,7 @@ class TestSkipExisting:
         graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
         graphql_client.get_media_by_url.return_value = _media("existing-m")
 
-        asyncio.get_event_loop().run_until_complete(
-            engine.process_file(file, skip_existing=True)
-        )
+        asyncio.run(engine.process_file(file, skip_existing=True))
 
         drive_client.download_file.assert_not_called()
         assert progress.files["f1"].status == FileStatus.COMPLETED
@@ -478,9 +474,7 @@ class TestSkipExisting:
         )
         graphql_client.create_media.return_value = _media("m-1")
 
-        asyncio.get_event_loop().run_until_complete(
-            engine.process_file(file, skip_existing=True)
-        )
+        asyncio.run(engine.process_file(file, skip_existing=True))
 
         drive_client.download_file.assert_called_once()
         assert progress.files["f1"].status == FileStatus.COMPLETED
@@ -501,7 +495,7 @@ class TestErrorHandling:
         graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
         drive_client.download_file.side_effect = DownloadError("Network error")
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         assert progress.files["f1"].status == FileStatus.FAILED
         assert "Download failed" in (progress.files["f1"].error or "")
@@ -522,7 +516,7 @@ class TestErrorHandling:
         drive_client.download_file.return_value = b"data"
         storage_client.upload_file.side_effect = UploadError("S3 error")
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         assert progress.files["f1"].status == FileStatus.FAILED
         assert "Upload failed" in (progress.files["f1"].error or "")
@@ -540,7 +534,7 @@ class TestErrorHandling:
             "Server error", operation="query"
         )
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         assert progress.files["f1"].status == FileStatus.FAILED
         assert "Observation query failed" in (progress.files["f1"].error or "")
@@ -559,7 +553,7 @@ class TestErrorHandling:
         )
 
         with pytest.raises(AuthenticationError):
-            asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+            asyncio.run(engine.process_file(file))
 
     def test_auth_error_during_download_propagates(
         self,
@@ -578,7 +572,7 @@ class TestErrorHandling:
         )
 
         with pytest.raises(AuthenticationError):
-            asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+            asyncio.run(engine.process_file(file))
 
     def test_auth_error_during_upload_propagates(
         self,
@@ -599,7 +593,7 @@ class TestErrorHandling:
         )
 
         with pytest.raises(AuthenticationError):
-            asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+            asyncio.run(engine.process_file(file))
 
     def test_auth_error_during_create_media_propagates(
         self,
@@ -621,7 +615,7 @@ class TestErrorHandling:
         )
 
         with pytest.raises(AuthenticationError):
-            asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+            asyncio.run(engine.process_file(file))
 
     def test_all_media_creation_fails(
         self,
@@ -642,7 +636,7 @@ class TestErrorHandling:
             "Server error", operation="CreateMedia"
         )
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         fp = progress.files["f1"]
         assert fp.status == FileStatus.FAILED
@@ -672,7 +666,7 @@ class TestRetry:
         storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
         graphql_client.create_media.return_value = _media("m-1")
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         assert drive_client.download_file.call_count == 2
         assert progress.files["f1"].status == FileStatus.COMPLETED
@@ -699,7 +693,7 @@ class TestRetry:
         storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
         graphql_client.create_media.return_value = _media("m-1")
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         assert drive_client.download_file.call_count == 2
         assert progress.files["f1"].status == FileStatus.COMPLETED
@@ -720,7 +714,7 @@ class TestRetry:
         graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
         drive_client.download_file.side_effect = DownloadError("Persistent")
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         assert drive_client.download_file.call_count == 2
         assert progress.files["f1"].status == FileStatus.FAILED
@@ -755,7 +749,7 @@ class TestMigrate:
             _media("m-2", obs_id="obs-2"),
         ]
 
-        asyncio.get_event_loop().run_until_complete(engine.migrate("folder-1"))
+        asyncio.run(engine.migrate("folder-1"))
 
         assert progress.files["f1"].status == FileStatus.COMPLETED
         assert progress.files["f2"].status == FileStatus.COMPLETED
@@ -786,7 +780,7 @@ class TestMigrate:
         storage_client.upload_file.return_value = "https://bucket/media/obs-2/6603.jpg"
         graphql_client.create_media.return_value = _media("m-2", obs_id="obs-2")
 
-        asyncio.get_event_loop().run_until_complete(engine.migrate("folder-1"))
+        asyncio.run(engine.migrate("folder-1"))
 
         assert drive_client.download_file.call_count == 1
         assert progress.files["f2"].status == FileStatus.COMPLETED
@@ -798,9 +792,7 @@ class TestResume:
         engine: MigrationEngine,
     ) -> None:
         with pytest.raises(MigratorError, match="No progress file"):
-            asyncio.get_event_loop().run_until_complete(
-                engine.resume("nonexistent-folder")
-            )
+            asyncio.run(engine.resume("nonexistent-folder"))
 
     def test_retries_failed_files(
         self,
@@ -827,7 +819,7 @@ class TestResume:
         storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
         graphql_client.create_media.return_value = _media("m-1")
 
-        asyncio.get_event_loop().run_until_complete(engine.resume("folder-1"))
+        asyncio.run(engine.resume("folder-1"))
 
         assert progress.files["f1"].status == FileStatus.COMPLETED
 
@@ -866,7 +858,7 @@ class TestResume:
             _media("m-b", obs_id="obs-b"),
         ]
 
-        asyncio.get_event_loop().run_until_complete(engine.resume("folder-1"))
+        asyncio.run(engine.resume("folder-1"))
 
         fp = progress.files["f1"]
         assert fp.status == FileStatus.COMPLETED
@@ -885,7 +877,7 @@ class TestResume:
         )
         progress.save()
 
-        asyncio.get_event_loop().run_until_complete(engine.resume("folder-1"))
+        asyncio.run(engine.resume("folder-1"))
 
 
 class TestProgressCallback:
@@ -908,7 +900,7 @@ class TestProgressCallback:
         storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
         graphql_client.create_media.return_value = _media("m-1")
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         callback.assert_called_once_with("6602.jpg", FileStatus.COMPLETED)
 
@@ -925,7 +917,7 @@ class TestProgressCallback:
         file = _drive_file("f1", "99999.jpg")
         graphql_client.get_observations_by_sequential_ids.return_value = {}
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         callback.assert_called_once_with("99999.jpg", FileStatus.ORPHAN)
 
@@ -938,7 +930,7 @@ class TestEdgeCases:
         progress: ProgressTracker,
     ) -> None:
         drive_client.list_files.return_value = []
-        result = asyncio.get_event_loop().run_until_complete(engine.scan("folder-1"))
+        result = asyncio.run(engine.scan("folder-1"))
 
         assert sum(result.values()) == 0
         assert progress.total_files == 0
@@ -949,7 +941,7 @@ class TestEdgeCases:
         drive_client: MagicMock,
     ) -> None:
         drive_client.list_files.return_value = []
-        asyncio.get_event_loop().run_until_complete(engine.migrate("folder-1"))
+        asyncio.run(engine.migrate("folder-1"))
 
         summary = engine.get_summary()
         assert summary["total"] == 0
@@ -983,7 +975,7 @@ class TestEdgeCases:
         storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
         graphql_client.create_media.return_value = _media("m-1")
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         graphql_client.create_media.assert_called_once_with(
             "https://bucket/media/obs-1/6602.jpg",
@@ -1013,9 +1005,7 @@ class TestEdgeCases:
         storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
         graphql_client.create_media.return_value = _media("m-1")
 
-        asyncio.get_event_loop().run_until_complete(
-            engine.process_file(file, skip_existing=True)
-        )
+        asyncio.run(engine.process_file(file, skip_existing=True))
 
         drive_client.download_file.assert_called_once()
         assert progress.files["f1"].status == FileStatus.COMPLETED
@@ -1036,9 +1026,7 @@ class TestEdgeCases:
         )
 
         with pytest.raises(AuthenticationError):
-            asyncio.get_event_loop().run_until_complete(
-                engine.process_file(file, skip_existing=True)
-            )
+            asyncio.run(engine.process_file(file, skip_existing=True))
 
     def test_large_range_creates_many_media_records(
         self,
@@ -1064,7 +1052,7 @@ class TestEdgeCases:
             _media(f"m-{i}", obs_id=f"obs-{i}") for i in range(1000, 1006)
         ]
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         assert graphql_client.create_media.call_count == 6
         storage_client.upload_file.assert_called_once()
@@ -1084,7 +1072,7 @@ class TestEdgeCases:
 
         graphql_client.get_observations_by_sequential_ids.return_value = {}
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         fp = progress.files["f1"]
         assert fp.status == FileStatus.ORPHAN
@@ -1111,7 +1099,7 @@ class TestEdgeCases:
         ]
         graphql_client.create_media.side_effect = [_media(f"m-{i}") for i in range(5)]
 
-        asyncio.get_event_loop().run_until_complete(engine.migrate("folder-1"))
+        asyncio.run(engine.migrate("folder-1"))
 
         assert len(progress.files) == 5
         for fp in progress.files.values():
@@ -1136,7 +1124,7 @@ class TestEdgeCases:
         storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
         graphql_client.create_media.return_value = _media("m-1")
 
-        asyncio.get_event_loop().run_until_complete(engine.migrate("folder-1"))
+        asyncio.run(engine.migrate("folder-1"))
 
         assert progress.files["f1"].status == FileStatus.COMPLETED
         assert progress.files["f2"].status == FileStatus.NEEDS_REVIEW
@@ -1161,7 +1149,7 @@ class TestEdgeCases:
             "File not found", file_id="f1"
         )
 
-        asyncio.get_event_loop().run_until_complete(engine.resume("folder-1"))
+        asyncio.run(engine.resume("folder-1"))
 
         assert progress.files["f1"].status == FileStatus.FAILED
         assert "Could not fetch file metadata" in (progress.files["f1"].error or "")
@@ -1184,7 +1172,7 @@ class TestEdgeCases:
         storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.JPG"
         graphql_client.create_media.return_value = _media("m-1")
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         assert progress.files["f1"].status == FileStatus.COMPLETED
 
@@ -1214,11 +1202,56 @@ class TestErrorClearing:
         storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
         graphql_client.create_media.return_value = _media("m-1")
 
-        asyncio.get_event_loop().run_until_complete(engine.process_file(file))
+        asyncio.run(engine.process_file(file))
 
         fp = progress.files["f1"]
         assert fp.status == FileStatus.COMPLETED
         assert fp.error is None
+
+
+class TestSaveInterval:
+    def test_periodic_save_triggered(
+        self,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+        mapper: FilenameMapper,
+    ) -> None:
+        engine = MigrationEngine(
+            drive_client=drive_client,
+            storage_client=storage_client,
+            graphql_client=graphql_client,
+            progress_tracker=progress,
+            mapper=mapper,
+            concurrency=SAVE_INTERVAL,
+            retry_attempts=1,
+            retry_delay_seconds=0,
+        )
+
+        num_files = SAVE_INTERVAL
+        files = [_drive_file(f"f{i}", f"{6600 + i}.jpg") for i in range(num_files)]
+        drive_client.list_files.return_value = files
+
+        def mock_get_obs(seq_ids: list) -> dict:
+            return {sid: _observation(f"obs-{sid}", sid) for sid in seq_ids}
+
+        graphql_client.get_observations_by_sequential_ids.side_effect = mock_get_obs
+        drive_client.download_file.return_value = b"data"
+        storage_client.upload_file.side_effect = [
+            f"https://bucket/media/obs-{6600 + i}/{6600 + i}.jpg"
+            for i in range(num_files)
+        ]
+        graphql_client.create_media.side_effect = [
+            _media(f"m-{i}") for i in range(num_files)
+        ]
+
+        with patch.object(progress, "save", wraps=progress.save) as save_spy:
+            asyncio.run(engine.migrate("folder-1"))
+
+            # save called: once after registering files, once for periodic
+            # (at SAVE_INTERVAL), and once at end
+            assert save_spy.call_count >= 3
 
 
 class TestGetSummary:

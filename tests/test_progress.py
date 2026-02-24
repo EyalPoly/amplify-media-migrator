@@ -1,4 +1,6 @@
 import json
+import shutil
+from pathlib import Path
 
 import pytest
 
@@ -8,6 +10,8 @@ from amplify_media_migrator.migration.progress import (
     ProgressSummary,
     ProgressTracker,
 )
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture
@@ -161,6 +165,152 @@ class TestPendingAndFailedIds:
         assert ids == ["f1"]
 
 
+class TestPartialFileIds:
+    def test_partial_ids(self, tracker: ProgressTracker) -> None:
+        tracker.load("folder1")
+        tracker.update_file("f1", "1.jpg", FileStatus.PARTIAL)
+        tracker.update_file("f2", "2.jpg", FileStatus.COMPLETED)
+        tracker.update_file("f3", "3.jpg", FileStatus.PARTIAL)
+
+        ids = tracker.get_partial_file_ids()
+        assert sorted(ids) == ["f1", "f3"]
+
+    def test_partial_ids_empty(self, tracker: ProgressTracker) -> None:
+        tracker.load("folder1")
+        tracker.update_file("f1", "1.jpg", FileStatus.COMPLETED)
+
+        ids = tracker.get_partial_file_ids()
+        assert ids == []
+
+
+class TestDownloadedUploadedStatuses:
+    def test_downloaded_in_summary(self, tracker: ProgressTracker) -> None:
+        tracker.load("folder1")
+        tracker.update_file("f1", "1.jpg", FileStatus.DOWNLOADED)
+        tracker.update_file("f2", "2.jpg", FileStatus.UPLOADED)
+
+        summary = tracker.get_summary()
+        assert summary.downloaded == 1
+        assert summary.uploaded == 1
+
+    def test_all_statuses_in_summary(self, tracker: ProgressTracker) -> None:
+        tracker.load("folder1")
+        tracker.update_file("f1", "1.jpg", FileStatus.PENDING)
+        tracker.update_file("f2", "2.jpg", FileStatus.DOWNLOADED)
+        tracker.update_file("f3", "3.jpg", FileStatus.UPLOADED)
+        tracker.update_file("f4", "4.jpg", FileStatus.COMPLETED)
+        tracker.update_file("f5", "5.jpg", FileStatus.FAILED)
+        tracker.update_file("f6", "6.jpg", FileStatus.ORPHAN)
+        tracker.update_file("f7", "7.jpg", FileStatus.NEEDS_REVIEW)
+        tracker.update_file("f8", "8.jpg", FileStatus.PARTIAL)
+
+        summary = tracker.get_summary()
+        assert summary.pending == 1
+        assert summary.downloaded == 1
+        assert summary.uploaded == 1
+        assert summary.completed == 1
+        assert summary.failed == 1
+        assert summary.orphan == 1
+        assert summary.needs_review == 1
+        assert summary.partial == 1
+
+
+class TestFullFieldSerialization:
+    def test_all_fields_roundtrip(self, tracker: ProgressTracker) -> None:
+        tracker.load("folder1")
+        tracker.update_file(
+            "f1",
+            "6000-6001.jpg",
+            FileStatus.COMPLETED,
+            sequential_ids=[6000, 6001],
+            observation_ids=["obs-a", "obs-b"],
+            s3_url="https://bucket/media/obs-a/6000-6001.jpg",
+            media_ids=["media-1", "media-2"],
+        )
+        tracker.save()
+
+        tracker2 = ProgressTracker(progress_dir=tracker._progress_dir)
+        tracker2.load("folder1")
+        f1 = tracker2.get_file("f1")
+        assert f1 is not None
+        assert f1.filename == "6000-6001.jpg"
+        assert f1.status == FileStatus.COMPLETED
+        assert f1.sequential_ids == [6000, 6001]
+        assert f1.observation_ids == ["obs-a", "obs-b"]
+        assert f1.s3_url == "https://bucket/media/obs-a/6000-6001.jpg"
+        assert f1.media_ids == ["media-1", "media-2"]
+        assert f1.error is None
+        assert f1.updated_at is not None
+
+    def test_error_field_roundtrip(self, tracker: ProgressTracker) -> None:
+        tracker.load("folder1")
+        tracker.update_file(
+            "f1",
+            "bad.txt",
+            FileStatus.NEEDS_REVIEW,
+            error="Unsupported extension",
+        )
+        tracker.save()
+
+        tracker2 = ProgressTracker(progress_dir=tracker._progress_dir)
+        tracker2.load("folder1")
+        f1 = tracker2.get_file("f1")
+        assert f1 is not None
+        assert f1.error == "Unsupported extension"
+
+
+class TestBuildSummaryDict:
+    def test_summary_dict_keys(self, tracker: ProgressTracker) -> None:
+        tracker.load("folder1")
+        tracker.update_file("f1", "1.jpg", FileStatus.COMPLETED)
+        tracker.update_file("f2", "2.jpg", FileStatus.FAILED)
+
+        summary_dict = tracker._build_summary_dict()
+        assert set(summary_dict.keys()) == {
+            "pending",
+            "downloaded",
+            "uploaded",
+            "completed",
+            "failed",
+            "orphan",
+            "needs_review",
+            "partial",
+        }
+        assert summary_dict["completed"] == 1
+        assert summary_dict["failed"] == 1
+
+    def test_summary_saved_in_progress_file(self, tracker: ProgressTracker) -> None:
+        tracker.load("folder1")
+        tracker.update_file("f1", "1.jpg", FileStatus.COMPLETED)
+        tracker.save()
+
+        path = tracker.progress_path
+        assert path is not None
+        data = json.loads(path.read_text())
+        assert "summary" in data
+        assert data["summary"]["completed"] == 1
+
+
+class TestUpdateFileClearsError:
+    def test_error_cleared_on_status_update(self, tracker: ProgressTracker) -> None:
+        tracker.load("folder1")
+        tracker.update_file("f1", "1.jpg", FileStatus.FAILED, error="old error")
+        tracker.update_file("f1", "1.jpg", FileStatus.COMPLETED)
+        f = tracker.get_file("f1")
+        assert f is not None
+        assert f.error is None
+
+    def test_media_ids_updated(self, tracker: ProgressTracker) -> None:
+        tracker.load("folder1")
+        tracker.update_file("f1", "1.jpg", FileStatus.PENDING)
+        tracker.update_file(
+            "f1", "1.jpg", FileStatus.COMPLETED, media_ids=["m-1", "m-2"]
+        )
+        f = tracker.get_file("f1")
+        assert f is not None
+        assert f.media_ids == ["m-1", "m-2"]
+
+
 class TestExportToJson:
     def test_export(self, tracker: ProgressTracker, tmp_path) -> None:  # type: ignore[no-untyped-def]
         tracker.load("folder1")
@@ -182,3 +332,44 @@ class TestExportToJson:
         output = tmp_path / "export.json"
         count = tracker.export_to_json(FileStatus.ORPHAN, output)
         assert count == 0
+
+
+class TestLoadFromFixture:
+    def test_load_sample_progress_file(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        fixture_path = FIXTURES_DIR / "sample_progress_file.json"
+        dest = tmp_path / "progress_1ABC_test_folder.json"
+        shutil.copy(fixture_path, dest)
+
+        tracker = ProgressTracker(progress_dir=tmp_path)
+        loaded = tracker.load("1ABC_test_folder")
+        assert loaded is True
+        assert tracker.total_files == 9
+
+        summary = tracker.get_summary()
+        assert summary.completed == 2
+        assert summary.failed == 1
+        assert summary.orphan == 1
+        assert summary.needs_review == 1
+        assert summary.partial == 1
+        assert summary.pending == 1
+        assert summary.downloaded == 1
+        assert summary.uploaded == 1
+
+        completed = tracker.get_file("file-single-1")
+        assert completed is not None
+        assert completed.status == FileStatus.COMPLETED
+        assert completed.media_ids == ["media-xyz-456"]
+
+        partial = tracker.get_file("file-partial-1")
+        assert partial is not None
+        assert partial.status == FileStatus.PARTIAL
+        assert partial.sequential_ids == [5000, 5001, 5002]
+
+        pending = tracker.get_pending_file_ids()
+        assert pending == ["file-pending-1"]
+
+        failed = tracker.get_failed_file_ids()
+        assert failed == ["file-failed-1"]
+
+        partial_ids = tracker.get_partial_file_ids()
+        assert partial_ids == ["file-partial-1"]

@@ -1,0 +1,76 @@
+{
+  "files": [
+    {
+      "id": "file-single-1",
+      "name": "6602.jpg",
+      "mimeType": "image/jpeg",
+      "size": 1048576,
+      "pattern": "single",
+      "expected_sequential_ids": [6602]
+    },
+    {
+      "id": "file-single-2",
+      "name": "12345.mp4",
+      "mimeType": "video/mp4",
+      "size": 15728640,
+      "pattern": "single",
+      "expected_sequential_ids": [12345]
+    },
+    {
+      "id": "file-multiple-1",
+      "name": "6602a.jpg",
+      "mimeType": "image/jpeg",
+      "size": 524288,
+      "pattern": "multiple",
+      "expected_sequential_ids": [6602]
+    },
+    {
+      "id": "file-multiple-2",
+      "name": "6602b.png",
+      "mimeType": "image/png",
+      "size": 786432,
+      "pattern": "multiple",
+      "expected_sequential_ids": [6602]
+    },
+    {
+      "id": "file-range-1",
+      "name": "6000-6001.jpg",
+      "mimeType": "image/jpeg",
+      "size": 2097152,
+      "pattern": "range",
+      "expected_sequential_ids": [6000, 6001]
+    },
+    {
+      "id": "file-range-2",
+      "name": "1200-1205.mp4",
+      "mimeType": "video/mp4",
+      "size": 31457280,
+      "pattern": "range",
+      "expected_sequential_ids": [1200, 1201, 1202, 1203, 1204, 1205]
+    },
+    {
+      "id": "file-invalid-1",
+      "name": "photo.jpg",
+      "mimeType": "image/jpeg",
+      "size": 102400,
+      "pattern": "invalid",
+      "expected_error": "Filename does not match any valid pattern"
+    },
+    {
+      "id": "file-invalid-2",
+      "name": "6602.pdf",
+      "mimeType": "application/pdf",
+      "size": 51200,
+      "pattern": "invalid",
+      "expected_error": "Unsupported extension: pdf"
+    },
+    {
+      "id": "file-invalid-3",
+      "name": "6602",
+      "mimeType": "application/octet-stream",
+      "size": 10240,
+      "pattern": "invalid",
+      "expected_error": "Missing file extension"
+    }
+  ]
+}
