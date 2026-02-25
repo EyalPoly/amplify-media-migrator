@@ -20,6 +20,8 @@ from amplify_media_migrator.cli import (
     review,
     scan,
     show,
+    status,
+    validate,
 )
 from amplify_media_migrator.config import (
     Config,
@@ -769,3 +771,152 @@ class TestMigrateVerbose:
         result = runner.invoke(main, ["migrate", "--folder-id", "test", "--verbose"])
         assert result.exit_code == 0
         mock_setup_logging.assert_called_once_with(level="DEBUG")
+
+
+class TestValidateCommand:
+    @patch("amplify_media_migrator.cli.GraphQLClient")
+    @patch("amplify_media_migrator.cli.AmplifyStorageClient")
+    @patch("amplify_media_migrator.cli._authenticate_cognito")
+    @patch("amplify_media_migrator.cli._authenticate_google")
+    @patch("amplify_media_migrator.cli._load_config")
+    def test_all_pass(
+        self,
+        mock_load: MagicMock,
+        mock_auth_g: MagicMock,
+        mock_auth_c: MagicMock,
+        mock_storage_cls: MagicMock,
+        mock_gql_cls: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        mock_cfg = MagicMock()
+        mock_cfg.get.side_effect = lambda key: "test-value"
+        mock_load.return_value = mock_cfg
+        mock_drive = MagicMock()
+        mock_drive.list_files.return_value = iter([])
+        mock_auth_g.return_value = mock_drive
+        mock_auth_c.return_value = "test-token"
+        mock_storage = MagicMock()
+        mock_storage.file_exists.return_value = False
+        mock_storage_cls.return_value = mock_storage
+        mock_gql = MagicMock()
+        mock_gql.get_observation_by_sequential_id.return_value = None
+        mock_gql_cls.return_value = mock_gql
+
+        result = runner.invoke(main, ["validate", "--folder-id", "test-folder"])
+        assert result.exit_code == 0
+        assert "[PASS] Configuration loaded" in result.output
+        assert "[PASS] Google Drive authentication" in result.output
+        assert "[PASS] Google Drive folder access" in result.output
+        assert "[PASS] Cognito authentication" in result.output
+        assert "[PASS] S3 bucket access" in result.output
+        assert "[PASS] GraphQL endpoint" in result.output
+        assert "All checks passed" in result.output
+
+    @patch("amplify_media_migrator.cli._load_config")
+    def test_config_failure_exits_immediately(
+        self,
+        mock_load: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        mock_load.side_effect = SystemExit(1)
+
+        result = runner.invoke(main, ["validate", "--folder-id", "test-folder"])
+        assert result.exit_code == 1
+        assert "[FAIL] Configuration" in result.output
+
+    @patch("amplify_media_migrator.cli._authenticate_cognito")
+    @patch("amplify_media_migrator.cli._authenticate_google")
+    @patch("amplify_media_migrator.cli._load_config")
+    def test_google_auth_failure_skips_folder(
+        self,
+        mock_load: MagicMock,
+        mock_auth_g: MagicMock,
+        mock_auth_c: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        mock_cfg = MagicMock()
+        mock_cfg.get.side_effect = lambda key: "test-value"
+        mock_load.return_value = mock_cfg
+        mock_auth_g.side_effect = SystemExit(1)
+        mock_auth_c.return_value = "test-token"
+
+        with patch("amplify_media_migrator.cli.AmplifyStorageClient") as mock_s, patch(
+            "amplify_media_migrator.cli.GraphQLClient"
+        ) as mock_g:
+            mock_storage = MagicMock()
+            mock_storage.file_exists.return_value = False
+            mock_s.return_value = mock_storage
+            mock_gql = MagicMock()
+            mock_gql.get_observation_by_sequential_id.return_value = None
+            mock_g.return_value = mock_gql
+
+            result = runner.invoke(main, ["validate", "--folder-id", "test-folder"])
+
+        assert result.exit_code == 1
+        assert "[FAIL] Google Drive authentication" in result.output
+        assert "[SKIP] Google Drive folder access" in result.output
+
+    def test_missing_folder_id(self, runner: CliRunner) -> None:
+        result = runner.invoke(main, ["validate"])
+        assert result.exit_code != 0
+        assert "Missing option" in result.output or "required" in result.output.lower()
+
+
+class TestStatusCommand:
+    def test_no_progress_file(self, runner: CliRunner) -> None:
+        with patch("amplify_media_migrator.cli.ProgressTracker") as mock_tracker_cls:
+            mock_tracker = MagicMock()
+            mock_tracker.load.return_value = False
+            mock_tracker_cls.return_value = mock_tracker
+
+            result = runner.invoke(main, ["status", "--folder-id", "test-folder"])
+            assert result.exit_code == 1
+            assert "No progress file" in result.output
+
+    def test_shows_summary_with_percentage(self, runner: CliRunner) -> None:
+        from amplify_media_migrator.migration.progress import ProgressSummary
+
+        with patch("amplify_media_migrator.cli.ProgressTracker") as mock_tracker_cls:
+            mock_tracker = MagicMock()
+            mock_tracker.load.return_value = True
+            mock_tracker.total_files = 100
+            mock_tracker.files = {"f1": None, "f2": None}
+            mock_tracker.get_summary.return_value = ProgressSummary(
+                completed=50,
+                failed=5,
+                orphan=10,
+                needs_review=3,
+                partial=2,
+                pending=30,
+                downloaded=0,
+                uploaded=0,
+            )
+            mock_tracker_cls.return_value = mock_tracker
+
+            result = runner.invoke(main, ["status", "--folder-id", "test-folder"])
+            assert result.exit_code == 0
+            assert "Migration status for folder test-folder" in result.output
+            assert "Total files:    100" in result.output
+            assert "Completed:      50" in result.output
+            assert "Failed:         5" in result.output
+            assert "Progress:       70.0%" in result.output
+
+    def test_empty_progress(self, runner: CliRunner) -> None:
+        from amplify_media_migrator.migration.progress import ProgressSummary
+
+        with patch("amplify_media_migrator.cli.ProgressTracker") as mock_tracker_cls:
+            mock_tracker = MagicMock()
+            mock_tracker.load.return_value = True
+            mock_tracker.total_files = 0
+            mock_tracker.files = {}
+            mock_tracker.get_summary.return_value = ProgressSummary()
+            mock_tracker_cls.return_value = mock_tracker
+
+            result = runner.invoke(main, ["status", "--folder-id", "test-folder"])
+            assert result.exit_code == 0
+            assert "Progress:       0.0%" in result.output
+
+    def test_missing_folder_id(self, runner: CliRunner) -> None:
+        result = runner.invoke(main, ["status"])
+        assert result.exit_code != 0
+        assert "Missing option" in result.output or "required" in result.output.lower()

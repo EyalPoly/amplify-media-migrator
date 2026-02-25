@@ -366,5 +366,128 @@ def export(folder_id: str, status: str, output: str) -> None:
     click.echo(f"Exported {count} files with status '{status}' to {output}")
 
 
+@main.command()
+@click.option("--folder-id", required=True, help="Google Drive folder ID")
+def validate(folder_id: str) -> None:
+    """Run pre-flight checks before migration."""
+    failed = False
+
+    # 1. Config
+    try:
+        cfg = _load_config()
+        click.echo("[PASS] Configuration loaded")
+    except SystemExit:
+        click.echo("[FAIL] Configuration")
+        raise SystemExit(1)
+
+    # 2. Google Drive authentication
+    google_ok = False
+    try:
+        drive_client = _authenticate_google(cfg)
+        click.echo("[PASS] Google Drive authentication")
+        google_ok = True
+    except SystemExit:
+        click.echo("[FAIL] Google Drive authentication")
+        failed = True
+
+    # 3. Google Drive folder access
+    if google_ok:
+        try:
+            list(drive_client.list_files(folder_id, recursive=False))
+            click.echo("[PASS] Google Drive folder access")
+        except Exception as e:
+            click.echo(f"[FAIL] Google Drive folder access: {e}")
+            failed = True
+    else:
+        click.echo("[SKIP] Google Drive folder access")
+
+    # 4. Cognito authentication
+    cognito_ok = False
+    try:
+        id_token = _authenticate_cognito(cfg)
+        click.echo("[PASS] Cognito authentication")
+        cognito_ok = True
+    except SystemExit:
+        click.echo("[FAIL] Cognito authentication")
+        failed = True
+
+    # 5. S3 bucket access
+    if cognito_ok:
+        try:
+            storage_client = AmplifyStorageClient(
+                bucket=cfg.get("aws.amplify.storage_bucket"),
+                region=cfg.get("aws.region"),
+                identity_pool_id=cfg.get("aws.cognito.identity_pool_id"),
+                user_pool_id=cfg.get("aws.cognito.user_pool_id"),
+            )
+            storage_client.connect(id_token)
+            storage_client.file_exists("__validate_check__")
+            click.echo("[PASS] S3 bucket access")
+        except Exception as e:
+            click.echo(f"[FAIL] S3 bucket access: {e}")
+            failed = True
+    else:
+        click.echo("[SKIP] S3 bucket access")
+
+    # 6. GraphQL endpoint
+    if cognito_ok:
+        try:
+            graphql_client = GraphQLClient(
+                api_endpoint=cfg.get("aws.amplify.api_endpoint"),
+                region=cfg.get("aws.region"),
+            )
+            graphql_client.connect(id_token)
+            graphql_client.get_observation_by_sequential_id(0)
+            click.echo("[PASS] GraphQL endpoint")
+        except Exception as e:
+            click.echo(f"[FAIL] GraphQL endpoint: {e}")
+            failed = True
+    else:
+        click.echo("[SKIP] GraphQL endpoint")
+
+    if failed:
+        click.echo("\nValidation failed.")
+        raise SystemExit(1)
+    else:
+        click.echo("\nAll checks passed.")
+
+
+@main.command()
+@click.option("--folder-id", required=True, help="Google Drive folder ID")
+def status(folder_id: str) -> None:
+    """Show migration progress for a folder."""
+    tracker = ProgressTracker()
+    if not tracker.load(folder_id):
+        click.echo(f"No progress file found for folder {folder_id}")
+        raise SystemExit(1)
+
+    summary = tracker.get_summary()
+    total = tracker.total_files or len(tracker.files)
+    processed = (
+        summary.completed
+        + summary.failed
+        + summary.orphan
+        + summary.needs_review
+        + summary.partial
+    )
+
+    click.echo(f"Migration status for folder {folder_id}\n")
+    click.echo(f"  Total files:    {total}")
+    click.echo(f"  Completed:      {summary.completed}")
+    click.echo(f"  Failed:         {summary.failed}")
+    click.echo(f"  Orphan:         {summary.orphan}")
+    click.echo(f"  Needs review:   {summary.needs_review}")
+    click.echo(f"  Partial:        {summary.partial}")
+    click.echo(f"  Pending:        {summary.pending}")
+    click.echo(f"  Downloaded:     {summary.downloaded}")
+    click.echo(f"  Uploaded:       {summary.uploaded}")
+
+    if total > 0:
+        pct = (processed / total) * 100
+        click.echo(f"\n  Progress:       {pct:.1f}%")
+    else:
+        click.echo(f"\n  Progress:       0.0%")
+
+
 if __name__ == "__main__":
     main()

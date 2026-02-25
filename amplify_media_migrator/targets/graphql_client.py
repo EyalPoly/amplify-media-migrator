@@ -234,9 +234,3 @@ class GraphQLClient:
             type=MediaType(item["type"]),
             is_available_for_public_use=item["isAvailableForPublicUse"],
         )
-
-    def list_media_for_observation(self, observation_id: str) -> List[Media]:
-        raise NotImplementedError
-
-    def delete_media(self, media_id: str) -> None:
-        raise NotImplementedError
