@@ -421,7 +421,7 @@ def validate(folder_id: str) -> None:
                 user_pool_id=cfg.get("aws.cognito.user_pool_id"),
             )
             storage_client.connect(id_token)
-            storage_client.file_exists("__validate_check__")
+            storage_client.file_exists("media/__validate_check__")
             click.echo("[PASS] S3 bucket access")
         except Exception as e:
             click.echo(f"[FAIL] S3 bucket access: {e}")
