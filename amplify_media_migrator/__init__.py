@@ -1,6 +1,6 @@
 """Amplify Media Migrator - Migrate media files from Google Drive to AWS Amplify Storage."""
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 
 from .config import ConfigManager
 from .migration.engine import MigrationEngine

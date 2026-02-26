@@ -257,10 +257,12 @@ class ConfigManager:
         self.set(key, value)
 
     def get_or_prompt(self, key: str, prompt_text: str, is_secret: bool = False) -> str:
-        value = self.get(key)
-        if not value:
+        existing = self.get(key)
+        if existing:
+            value = click.prompt(prompt_text, default=existing, hide_input=is_secret)
+        else:
             value = click.prompt(prompt_text, hide_input=is_secret)
-            self.set(key, value)
+        self.set(key, value)
         return str(value)
 
     def exists(self) -> bool:

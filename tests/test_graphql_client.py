@@ -439,15 +439,3 @@ class TestGetMediaByUrl:
         )
 
         assert result is None
-
-
-class TestStubMethods:
-    def test_list_media_not_implemented(self, connected_client: GraphQLClient) -> None:
-        with pytest.raises(NotImplementedError):
-            connected_client.list_media_for_observation("obs-1")
-
-    def test_delete_media_not_implemented(
-        self, connected_client: GraphQLClient
-    ) -> None:
-        with pytest.raises(NotImplementedError):
-            connected_client.delete_media("media-1")
