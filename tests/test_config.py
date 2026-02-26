@@ -336,12 +336,17 @@ class TestConfigEnvOverrides:
 
 
 class TestConfigManagerPrompts:
-    def test_returns_existing_value_without_prompting(self, manager):
+    def test_prompts_with_existing_value_as_default(self, manager):
         manager.load()
-        with patch("amplify_media_migrator.config.click.prompt") as mock_prompt:
+        existing = manager.get("aws.region")
+        with patch(
+            "amplify_media_migrator.config.click.prompt", return_value=existing
+        ) as mock_prompt:
             result = manager.get_or_prompt("aws.region", "Enter region")
-            mock_prompt.assert_not_called()
-            assert result == manager.get("aws.region")
+            mock_prompt.assert_called_once_with(
+                "Enter region", default=existing, hide_input=False
+            )
+            assert result == existing
 
     def test_prompts_when_value_is_empty(self, tmp_path):
         path = tmp_path / "empty_config.json"
