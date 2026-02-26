@@ -30,23 +30,45 @@ pip install amplify-media-migrator
 ## Google Drive Setup
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a project (or use existing) and enable the **Google Drive API**
-3. Create **OAuth 2.0 credentials** (Desktop application type)
-4. Download the credentials JSON file
-5. Place it at `~/.amplify-media-migrator/google_credentials.json`
+2. Select an existing project or create a new one
+3. Navigate to **APIs & Services > Enabled APIs & services**
+4. Click **+ ENABLE APIS AND SERVICES**, search for **Google Drive API**, and enable it
+5. Go to **APIs & Services > Credentials**
+6. Click **+ CREATE CREDENTIALS > OAuth client ID**
+7. If prompted to configure the consent screen first:
+   - Choose **External** user type
+   - Fill in an app name (e.g. "Media Migrator") and your email
+   - Skip scopes, add your email as a test user, then save
+8. Back on Create OAuth client ID: select **Desktop app**, give it a name, click **Create**
+9. Click **Download JSON** on the confirmation dialog
+10. Move the downloaded file:
+    ```bash
+    mv ~/Downloads/client_secret_*.json ~/.amplify-media-migrator/google_credentials.json
+    ```
 
 On first run, a browser window will open for OAuth consent. The resulting token is saved to `~/.amplify-media-migrator/google_token.json`.
 
 ## AWS Setup
 
-Ensure the following are deployed and available:
+The Amplify backend must already be deployed. You need the following values from it:
 
-| Resource | Description |
-|---|---|
-| **S3 Bucket** | Amplify Storage bucket for media files |
-| **AppSync API** | GraphQL endpoint with Observation and Media models |
-| **Cognito User Pool** | User pool with ADMINS group |
-| **Cognito Identity Pool** | Federated identity pool for S3 access |
+### S3 Bucket Name
+
+1. Go to the [AWS S3 Console](https://s3.console.aws.amazon.com/s3/buckets)
+2. Look for a bucket matching `amplify-<app-id>-<env>-<hash>-<storage-name>`
+3. Or run: `aws s3 ls | grep meco`
+
+### AppSync API Endpoint
+
+1. Go to the [AWS AppSync Console](https://console.aws.amazon.com/appsync)
+2. Select your API and copy the **API URL** from the Settings page
+
+### Cognito User Pool & Identity Pool
+
+1. Go to the [Amazon Cognito Console](https://console.aws.amazon.com/cognito)
+2. Select your **User Pool** — copy the **User Pool ID** and **App client ID** from the App integration tab
+3. Select your **Identity Pool** — copy the **Identity Pool ID**
+4. Ensure your user is in the **ADMINS** group
 
 ## Configuration
 
@@ -68,6 +90,17 @@ View current configuration:
 ```bash
 amplify-media-migrator show
 ```
+
+### Google Drive Folder ID
+
+The `--folder-id` used throughout the CLI is the ID from the Google Drive folder URL:
+
+```
+https://drive.google.com/drive/folders/1ABCxyz123456789
+                                       └── this is the folder ID
+```
+
+Open the folder containing your media files in Google Drive and copy the ID from the URL bar.
 
 ## Usage Workflow
 
