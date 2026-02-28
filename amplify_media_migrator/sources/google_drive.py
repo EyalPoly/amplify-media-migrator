@@ -36,7 +36,7 @@ class GoogleDriveClient:
         rate_limiter: Optional[RateLimiter] = None,
     ) -> None:
         self._credentials = credentials
-        self._rate_limiter = rate_limiter or RateLimiter(requests_per_second=10.0)
+        self._rate_limiter = rate_limiter or RateLimiter()
         self._service: Optional[Any] = None
 
     def connect(self) -> None:

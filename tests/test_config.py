@@ -87,7 +87,7 @@ class TestConfigDataClasses:
 
     def test_migration_defaults(self):
         migration = MigrationConfig()
-        assert migration.concurrency == 10
+        assert migration.concurrency == 100
         assert migration.retry_attempts == 3
         assert migration.retry_delay_seconds == 5
         assert migration.chunk_size_mb == 8
@@ -150,7 +150,7 @@ class TestConfigSerialization:
             config.google_drive.credentials_path
             == "~/.amplify-media-migrator/google_credentials.json"
         )
-        assert config.migration.concurrency == 10
+        assert config.migration.concurrency == 100
         assert config.aws.cognito.user_pool_id == ""
 
 
@@ -435,13 +435,13 @@ class TestConfigManagerEdgeCases:
         mgr.save()
         assert path.exists()
         data = json.loads(path.read_text())
-        assert data["migration"]["concurrency"] == 10
+        assert data["migration"]["concurrency"] == 100
 
     def test_get_without_loaded_config_falls_back(self, tmp_path):
         path = tmp_path / "missing.json"
         mgr = ConfigManager(config_path=path)
         result = mgr.get("migration.concurrency")
-        assert result == 10
+        assert result == 100
 
     def test_set_without_loaded_config_falls_back(self, tmp_path):
         path = tmp_path / "missing.json"
@@ -474,4 +474,4 @@ class TestConfigManagerProperties:
         mgr = ConfigManager(config_path=Path("/tmp/nonexistent_for_test.json"))
         config = mgr.config
         assert isinstance(config, Config)
-        assert config.migration.concurrency == 10
+        assert config.migration.concurrency == 100

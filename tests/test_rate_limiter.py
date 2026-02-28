@@ -9,9 +9,9 @@ from amplify_media_migrator.utils.rate_limiter import RateLimiter
 class TestRateLimiterInit:
     def test_default_values(self):
         limiter = RateLimiter()
-        assert limiter._requests_per_second == 10.0
-        assert limiter._burst_size == 10
-        assert limiter._tokens == 10.0
+        assert limiter._requests_per_second == 200.0
+        assert limiter._burst_size == 200
+        assert limiter._tokens == 200.0
         assert limiter._last_update is None
         assert limiter._lock is None
 

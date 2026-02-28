@@ -6,8 +6,8 @@ from typing import Optional
 class RateLimiter:
     def __init__(
         self,
-        requests_per_second: float = 10.0,
-        burst_size: int = 10,
+        requests_per_second: float = 200.0,
+        burst_size: int = 200,
     ) -> None:
         self._requests_per_second = requests_per_second
         self._burst_size = burst_size
