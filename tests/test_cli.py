@@ -334,7 +334,7 @@ class TestCreateEngine:
             mock_gql_cls.return_value = mock_gql
             mock_drive = MagicMock()
 
-            engine = _create_engine(mock_cfg, mock_drive, "token", concurrency=5)
+            engine = _create_engine(mock_cfg, mock_drive, "token")
             assert isinstance(engine, MigrationEngine)
             mock_storage.connect.assert_called_once_with("token")
             mock_gql.connect.assert_called_once_with("token")
@@ -635,43 +635,6 @@ class TestMigrateCommand:
         result = runner.invoke(main, ["migrate", "--folder-id", "test", "--dry-run"])
         assert result.exit_code == 0
         assert "[DRY RUN]" in result.output
-
-    @patch("amplify_media_migrator.cli._run_with_progress")
-    @patch("amplify_media_migrator.cli._create_engine")
-    @patch("amplify_media_migrator.cli._authenticate_cognito")
-    @patch("amplify_media_migrator.cli._authenticate_google")
-    @patch("amplify_media_migrator.cli._load_config")
-    def test_migrate_with_concurrency(
-        self,
-        mock_load: MagicMock,
-        mock_auth_g: MagicMock,
-        mock_auth_c: MagicMock,
-        mock_create: MagicMock,
-        mock_run_progress: MagicMock,
-        runner: CliRunner,
-    ) -> None:
-        mock_engine = MagicMock()
-        mock_engine.get_summary.return_value = {
-            "total": 0,
-            "completed": 0,
-            "failed": 0,
-            "orphan": 0,
-            "needs_review": 0,
-            "partial": 0,
-            "pending": 0,
-        }
-        mock_create.return_value = mock_engine
-
-        result = runner.invoke(
-            main, ["migrate", "--folder-id", "test", "--concurrency", "20"]
-        )
-        assert result.exit_code == 0
-        mock_create.assert_called_once()
-        assert (
-            mock_create.call_args[1].get("concurrency", mock_create.call_args[0][-1])
-            == 20
-            or 20 in mock_create.call_args[0]
-        )
 
 
 class TestResumeCommand:

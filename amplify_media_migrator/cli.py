@@ -40,7 +40,6 @@ def config() -> None:
         click.echo("No configuration file found. Creating a new one.")
 
     click.echo("\n--- Google Drive ---")
-    mgr.get_or_prompt("google_drive.folder_id", "Google Drive folder ID")
     mgr.get_or_prompt(
         "google_drive.credentials_path", "Path to Google credentials JSON"
     )
@@ -148,7 +147,6 @@ def _create_engine(
     cfg: ConfigManager,
     drive_client: GoogleDriveClient,
     id_token: str,
-    concurrency: int = 10,
 ) -> MigrationEngine:
     storage_client = AmplifyStorageClient(
         bucket=cfg.get("aws.amplify.storage_bucket"),
@@ -172,7 +170,7 @@ def _create_engine(
         graphql_client=graphql_client,
         progress_tracker=ProgressTracker(),
         mapper=FilenameMapper(),
-        concurrency=concurrency,
+        concurrency=migration_cfg.concurrency,
         retry_attempts=migration_cfg.retry_attempts,
         retry_delay_seconds=migration_cfg.retry_delay_seconds,
         default_media_public=migration_cfg.default_media_public,
@@ -236,6 +234,7 @@ def scan(folder_id: str) -> None:
         ),
         progress_tracker=ProgressTracker(),
         mapper=FilenameMapper(),
+        concurrency=cfg.config.migration.concurrency,
     )
 
     pattern_counts = asyncio.run(engine.scan(folder_id))
@@ -253,7 +252,6 @@ def scan(folder_id: str) -> None:
 
 @main.command()
 @click.option("--folder-id", required=True, help="Google Drive folder ID")
-@click.option("--concurrency", default=10, help="Number of parallel workers")
 @click.option("--dry-run", is_flag=True, help="Validate without uploading")
 @click.option(
     "--skip-existing", is_flag=True, help="Skip files with existing Media records"
@@ -261,7 +259,6 @@ def scan(folder_id: str) -> None:
 @click.option("--verbose", is_flag=True, help="Enable debug logging")
 def migrate(
     folder_id: str,
-    concurrency: int,
     dry_run: bool,
     skip_existing: bool,
     verbose: bool,
@@ -273,7 +270,7 @@ def migrate(
     cfg = _load_config()
     drive_client = _authenticate_google(cfg)
     id_token = _authenticate_cognito(cfg)
-    engine = _create_engine(cfg, drive_client, id_token, concurrency)
+    engine = _create_engine(cfg, drive_client, id_token)
 
     if dry_run:
         click.echo("\n[DRY RUN] No files will be downloaded or uploaded.\n")
@@ -291,7 +288,6 @@ def migrate(
 
 @main.command()
 @click.option("--folder-id", required=True, help="Google Drive folder ID")
-@click.option("--concurrency", default=10, help="Number of parallel workers")
 @click.option("--dry-run", is_flag=True, help="Validate without uploading")
 @click.option(
     "--skip-existing", is_flag=True, help="Skip files with existing Media records"
@@ -299,7 +295,6 @@ def migrate(
 @click.option("--verbose", is_flag=True, help="Enable debug logging")
 def resume(
     folder_id: str,
-    concurrency: int,
     dry_run: bool,
     skip_existing: bool,
     verbose: bool,
@@ -311,7 +306,7 @@ def resume(
     cfg = _load_config()
     drive_client = _authenticate_google(cfg)
     id_token = _authenticate_cognito(cfg)
-    engine = _create_engine(cfg, drive_client, id_token, concurrency)
+    engine = _create_engine(cfg, drive_client, id_token)
 
     click.echo(f"Resuming migration for folder {folder_id}...")
 

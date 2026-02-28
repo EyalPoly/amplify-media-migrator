@@ -150,7 +150,6 @@ Options:
 
 | Flag | Default | Description |
 |---|---|---|
-| `--concurrency` | 10 | Number of parallel workers |
 | `--dry-run` | off | Validate without uploading |
 | `--skip-existing` | off | Skip files with existing Media records |
 | `--verbose` | off | Enable debug logging |
@@ -215,7 +214,7 @@ Files that don't match any pattern are marked as `needs_review`.
 | "User not in ADMINS group" | Add the user to ADMINS in the Cognito console |
 | "S3 bucket not found" | Deploy Amplify storage first |
 | "Observation not found" | Verify the sequentialId exists, check the filename pattern |
-| "Rate limit exceeded" | Reduce `--concurrency` |
+| "Rate limit exceeded" | Reduce `migration.concurrency` in config |
 
 ## Development
 

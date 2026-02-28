@@ -29,7 +29,7 @@ class MigrationEngine:
         graphql_client: GraphQLClient,
         progress_tracker: ProgressTracker,
         mapper: FilenameMapper,
-        concurrency: int = 10,
+        concurrency: int,
         retry_attempts: int = 3,
         retry_delay_seconds: int = 5,
         default_media_public: bool = False,

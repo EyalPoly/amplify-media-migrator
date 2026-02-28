@@ -11,8 +11,7 @@ CLI tool to migrate ~20,000 media files (photos/videos) from Google Drive to AWS
 ### Scale & Performance
 - **Files**: ~20,000 (mix of photos and videos)
 - **Total size**: ~300 GB estimated (avg 15 MB/file)
-- **Expected duration**: 4-8 hours with local execution
-- **Bottleneck**: Google Drive API rate limit (10 queries/sec sustained)
+- **Expected duration**: 4-8 hours with local execution- **Bottleneck**: Google Drive API rate limit (12,000 queries/60sec = 200 QPS)
 
 ---
 
@@ -170,7 +169,7 @@ Examples:
     }
   },
   "migration": {
-    "concurrency": 10,
+    "concurrency": 100,
     "retry_attempts": 3,
     "retry_delay_seconds": 5,
     "chunk_size_mb": 8,
@@ -312,16 +311,15 @@ All errors logged to:
 ## Performance Constraints
 
 ### Google Drive API Rate Limits
-- **User quota**: 1,000 queries per 100 seconds (10 QPS sustained)
-- **Impact**: Even with 100 workers, you're limited to ~10 downloads/sec
-- **Mitigation**: Built-in rate limiter, exponential backoff on 429 errors
+- **User quota**: 12,000 queries per 60 seconds (200 QPS)
+- **Mitigation**: Built-in rate limiter at 200 QPS, exponential backoff on 429 errors
 
 ### AWS S3 Limits
 - **PUT requests**: 3,500 requests/sec per prefix (NOT a bottleneck)
 - **Transfer acceleration**: Optional (costs extra, provides 2-5x speedup for international transfers)
 
 ### Recommended Settings
-- **Concurrency**: 10 workers (balances throughput vs rate limits)
+- **Concurrency**: 100 workers (leaves headroom below 200 QPS ceiling)
 - **Chunk size**: 8 MB for multipart uploads
 - **Timeout**: 300 seconds per file (handle large videos)
 
@@ -354,7 +352,6 @@ amplify-media-migrator migrate --folder-id FOLDER_ID
 # With options
 amplify-media-migrator migrate \
   --folder-id FOLDER_ID \
-  --concurrency 10 \
   --dry-run \
   --skip-existing
 
@@ -368,7 +365,6 @@ amplify-media-migrator export --status orphan --output orphan_files.json
 
 ### Options
 - `--folder-id`: Google Drive folder ID (required)
-- `--concurrency`: Number of parallel workers (default: 10)
 - `--dry-run`: Validate without uploading (default: false)
 - `--skip-existing`: Skip files with existing Media records (default: false)
 - `--verbose`: Enable debug logging (default: false)
@@ -645,7 +641,7 @@ export LOG_LEVEL=DEBUG
 | "User not in ADMINS group" | Add user to ADMINS in Cognito console |
 | "S3 bucket not found" | Deploy Amplify storage first (`npx ampx sandbox`) |
 | "Observation not found" | Verify sequentialId exists, check filename pattern |
-| "Rate limit exceeded" | Reduce `--concurrency` value |
+| "Rate limit exceeded" | Reduce `migration.concurrency` in config |
 
 ---
 

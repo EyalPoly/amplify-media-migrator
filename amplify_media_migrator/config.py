@@ -44,7 +44,7 @@ class AWSConfig:
 
 @dataclass
 class MigrationConfig:
-    concurrency: int = 10
+    concurrency: int = 100
     retry_attempts: int = 3
     retry_delay_seconds: int = 5
     chunk_size_mb: int = 8
@@ -116,12 +116,17 @@ def config_from_dict(data: dict) -> Config:
     )
 
     mig_data = data.get("migration", {})
+    mig_defaults = MigrationConfig()
     migration = MigrationConfig(
-        concurrency=mig_data.get("concurrency", 10),
-        retry_attempts=mig_data.get("retry_attempts", 3),
-        retry_delay_seconds=mig_data.get("retry_delay_seconds", 5),
-        chunk_size_mb=mig_data.get("chunk_size_mb", 8),
-        default_media_public=mig_data.get("default_media_public", False),
+        concurrency=mig_data.get("concurrency", mig_defaults.concurrency),
+        retry_attempts=mig_data.get("retry_attempts", mig_defaults.retry_attempts),
+        retry_delay_seconds=mig_data.get(
+            "retry_delay_seconds", mig_defaults.retry_delay_seconds
+        ),
+        chunk_size_mb=mig_data.get("chunk_size_mb", mig_defaults.chunk_size_mb),
+        default_media_public=mig_data.get(
+            "default_media_public", mig_defaults.default_media_public
+        ),
     )
 
     return Config(google_drive=google_drive, aws=aws, migration=migration)
