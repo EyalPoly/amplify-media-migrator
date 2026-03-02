@@ -93,6 +93,8 @@ class GoogleDriveClient:
                     "q": query,
                     "fields": "nextPageToken, files(id, name, mimeType, size, parents)",
                     "pageSize": 1000,
+                    "supportsAllDrives": True,
+                    "includeItemsFromAllDrives": True,
                 }
                 if page_token:
                     request_kwargs["pageToken"] = page_token
@@ -127,7 +129,7 @@ class GoogleDriveClient:
     def download_file(self, file_id: str) -> bytes:
         service = self._ensure_connected()
         try:
-            request = service.files().get_media(fileId=file_id)
+            request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
             buffer = io.BytesIO()
             downloader = MediaIoBaseDownload(buffer, request)
 
@@ -149,7 +151,11 @@ class GoogleDriveClient:
         try:
             result = (
                 service.files()
-                .get(fileId=file_id, fields="id,name,mimeType,size,parents")
+                .get(
+                    fileId=file_id,
+                    fields="id,name,mimeType,size,parents",
+                    supportsAllDrives=True,
+                )
                 .execute()
             )
         except HttpError as e:
@@ -167,7 +173,11 @@ class GoogleDriveClient:
     def get_folder_name(self, folder_id: str) -> str:
         service = self._ensure_connected()
         try:
-            result = service.files().get(fileId=folder_id, fields="name").execute()
+            result = (
+                service.files()
+                .get(fileId=folder_id, fields="name", supportsAllDrives=True)
+                .execute()
+            )
         except HttpError as e:
             self._handle_http_error(e, file_id=folder_id)
 
