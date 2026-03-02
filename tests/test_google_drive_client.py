@@ -281,7 +281,9 @@ class TestDownloadFile:
         result = connected_client.download_file("file1")
 
         assert result == content
-        mock_service.files().get_media.assert_called_once_with(fileId="file1")
+        mock_service.files().get_media.assert_called_once_with(
+            fileId="file1", supportsAllDrives=True
+        )
 
     def test_404_raises_download_error(
         self, connected_client: GoogleDriveClient, mock_service: MagicMock

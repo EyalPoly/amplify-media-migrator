@@ -30,12 +30,13 @@ class Media:
 
 
 _QUERY_OBSERVATION_BY_SEQUENTIAL_ID = """
-query GetObservationBySequentialId($sequentialId: Int!) {
-  listObservations(filter: { sequentialId: { eq: $sequentialId } }) {
+query GetObservationBySequentialId($sequentialId: Int!, $nextToken: String) {
+  listObservations(filter: { sequentialId: { eq: $sequentialId } }, limit: 10000, nextToken: $nextToken) {
     items {
       id
       sequentialId
     }
+    nextToken
   }
 }
 """
@@ -53,8 +54,8 @@ mutation CreateMedia($input: CreateMediaInput!) {
 """
 
 _QUERY_MEDIA_BY_URL = """
-query GetMediaByUrl($url: AWSUrl!) {
-  listMedia(filter: { url: { eq: $url } }) {
+query GetMediaByUrl($url: AWSUrl!, $nextToken: String) {
+  listMedia(filter: { url: { eq: $url } }, limit: 10000, nextToken: $nextToken) {
     items {
       id
       url
@@ -62,6 +63,7 @@ query GetMediaByUrl($url: AWSUrl!) {
       type
       isAvailableForPublicUse
     }
+    nextToken
   }
 }
 """
@@ -160,21 +162,31 @@ class GraphQLClient:
     def get_observation_by_sequential_id(
         self, sequential_id: int
     ) -> Optional[Observation]:
-        data = self._execute(
-            _QUERY_OBSERVATION_BY_SEQUENTIAL_ID,
-            variables={"sequentialId": sequential_id},
-            operation="GetObservationBySequentialId",
-        )
+        next_token: Optional[str] = None
 
-        items = data.get("listObservations", {}).get("items", [])
-        if not items:
-            return None
+        while True:
+            variables: Dict[str, Any] = {"sequentialId": sequential_id}
+            if next_token:
+                variables["nextToken"] = next_token
 
-        item = items[0]
-        return Observation(
-            id=item["id"],
-            sequential_id=item["sequentialId"],
-        )
+            data = self._execute(
+                _QUERY_OBSERVATION_BY_SEQUENTIAL_ID,
+                variables=variables,
+                operation="GetObservationBySequentialId",
+            )
+
+            list_data = data.get("listObservations", {})
+            items = list_data.get("items", [])
+            if items:
+                item = items[0]
+                return Observation(
+                    id=item["id"],
+                    sequential_id=item["sequentialId"],
+                )
+
+            next_token = list_data.get("nextToken")
+            if not next_token:
+                return None
 
     def get_observations_by_sequential_ids(
         self, sequential_ids: List[int]
@@ -216,21 +228,31 @@ class GraphQLClient:
         )
 
     def get_media_by_url(self, url: str) -> Optional[Media]:
-        data = self._execute(
-            _QUERY_MEDIA_BY_URL,
-            variables={"url": url},
-            operation="GetMediaByUrl",
-        )
+        next_token: Optional[str] = None
 
-        items = data.get("listMedia", {}).get("items", [])
-        if not items:
-            return None
+        while True:
+            variables: Dict[str, Any] = {"url": url}
+            if next_token:
+                variables["nextToken"] = next_token
 
-        item = items[0]
-        return Media(
-            id=item["id"],
-            url=item["url"],
-            observation_id=item["observationId"],
-            type=MediaType(item["type"]),
-            is_available_for_public_use=item["isAvailableForPublicUse"],
-        )
+            data = self._execute(
+                _QUERY_MEDIA_BY_URL,
+                variables=variables,
+                operation="GetMediaByUrl",
+            )
+
+            list_data = data.get("listMedia", {})
+            items = list_data.get("items", [])
+            if items:
+                item = items[0]
+                return Media(
+                    id=item["id"],
+                    url=item["url"],
+                    observation_id=item["observationId"],
+                    type=MediaType(item["type"]),
+                    is_available_for_public_use=item["isAvailableForPublicUse"],
+                )
+
+            next_token = list_data.get("nextToken")
+            if not next_token:
+                return None

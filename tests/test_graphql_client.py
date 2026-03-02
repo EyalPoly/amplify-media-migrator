@@ -244,6 +244,72 @@ class TestGetObservationBySequentialId:
         assert result is not None
         assert result.id == "obs-1"
 
+    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    def test_paginates_to_find_observation(
+        self, mock_post: MagicMock, connected_client: GraphQLClient
+    ) -> None:
+        mock_post.side_effect = [
+            _make_response(
+                json_data={
+                    "data": {
+                        "listObservations": {
+                            "items": [],
+                            "nextToken": "token-page-2",
+                        }
+                    }
+                }
+            ),
+            _make_response(
+                json_data={
+                    "data": {
+                        "listObservations": {
+                            "items": [{"id": "obs-123", "sequentialId": 6001}],
+                            "nextToken": None,
+                        }
+                    }
+                }
+            ),
+        ]
+
+        result = connected_client.get_observation_by_sequential_id(6001)
+
+        assert result == Observation(id="obs-123", sequential_id=6001)
+        assert mock_post.call_count == 2
+        second_call_variables = mock_post.call_args_list[1][1]["json"]["variables"]
+        assert second_call_variables["nextToken"] == "token-page-2"
+
+    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    def test_returns_none_after_all_pages_exhausted(
+        self, mock_post: MagicMock, connected_client: GraphQLClient
+    ) -> None:
+        mock_post.side_effect = [
+            _make_response(
+                json_data={
+                    "data": {
+                        "listObservations": {
+                            "items": [],
+                            "nextToken": "token-2",
+                        }
+                    }
+                }
+            ),
+            _make_response(
+                json_data={
+                    "data": {
+                        "listObservations": {
+                            "items": [],
+                            "nextToken": None,
+                        }
+                    }
+                }
+            ),
+        ]
+
+        result = connected_client.get_observation_by_sequential_id(99999)
+
+        assert result is None
+        assert mock_post.call_count == 2
+
 
 class TestGetObservationsBySequentialIds:
     @patch("amplify_media_migrator.targets.graphql_client.requests.post")
@@ -439,3 +505,46 @@ class TestGetMediaByUrl:
         )
 
         assert result is None
+
+    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    def test_paginates_to_find_media(
+        self, mock_post: MagicMock, connected_client: GraphQLClient
+    ) -> None:
+        mock_post.side_effect = [
+            _make_response(
+                json_data={
+                    "data": {
+                        "listMedia": {
+                            "items": [],
+                            "nextToken": "media-token-2",
+                        }
+                    }
+                }
+            ),
+            _make_response(
+                json_data={
+                    "data": {
+                        "listMedia": {
+                            "items": [
+                                {
+                                    "id": "media-1",
+                                    "url": "https://bucket.s3.amazonaws.com/media/obs-1/photo.jpg",
+                                    "observationId": "obs-1",
+                                    "type": "IMAGE",
+                                    "isAvailableForPublicUse": False,
+                                }
+                            ],
+                            "nextToken": None,
+                        }
+                    }
+                }
+            ),
+        ]
+
+        result = connected_client.get_media_by_url(
+            "https://bucket.s3.amazonaws.com/media/obs-1/photo.jpg"
+        )
+
+        assert result is not None
+        assert result.id == "media-1"
+        assert mock_post.call_count == 2

@@ -237,7 +237,11 @@ def scan(folder_id: str) -> None:
         concurrency=cfg.config.migration.concurrency,
     )
 
-    pattern_counts = asyncio.run(engine.scan(folder_id))
+    try:
+        pattern_counts = asyncio.run(engine.scan(folder_id))
+    except MigratorError as e:
+        click.echo(f"\nError: {e}", err=True)
+        raise SystemExit(1)
 
     total = sum(pattern_counts.values())
     click.echo(f"\nScan complete. {total} files found.\n")
@@ -277,11 +281,15 @@ def migrate(
 
     click.echo(f"Starting migration for folder {folder_id}...")
 
-    _run_with_progress(
-        lambda: engine.migrate(folder_id, dry_run, skip_existing),
-        engine,
-        desc="Migrating",
-    )
+    try:
+        _run_with_progress(
+            lambda: engine.migrate(folder_id, dry_run, skip_existing),
+            engine,
+            desc="Migrating",
+        )
+    except MigratorError as e:
+        click.echo(f"\nError: {e}", err=True)
+        raise SystemExit(1)
 
     _print_summary(engine.get_summary())
 
@@ -310,11 +318,15 @@ def resume(
 
     click.echo(f"Resuming migration for folder {folder_id}...")
 
-    _run_with_progress(
-        lambda: engine.resume(folder_id, dry_run, skip_existing),
-        engine,
-        desc="Resuming",
-    )
+    try:
+        _run_with_progress(
+            lambda: engine.resume(folder_id, dry_run, skip_existing),
+            engine,
+            desc="Resuming",
+        )
+    except MigratorError as e:
+        click.echo(f"\nError: {e}", err=True)
+        raise SystemExit(1)
 
     _print_summary(engine.get_summary())
 
