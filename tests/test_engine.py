@@ -429,9 +429,7 @@ class TestDryRun:
         storage_client.upload_file.assert_not_called()
         graphql_client.create_media.assert_not_called()
 
-        fp = progress.files["f1"]
-        assert fp.status == FileStatus.COMPLETED
-        assert fp.observation_ids == ["obs-1"]
+        assert "f1" not in progress.files
 
 
 class TestSkipExisting:

@@ -1,5 +1,6 @@
 import io
 import logging
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterator, NoReturn, Optional
@@ -37,16 +38,20 @@ class GoogleDriveClient:
     ) -> None:
         self._credentials = credentials
         self._rate_limiter = rate_limiter or RateLimiter()
-        self._service: Optional[Any] = None
+        self._connected = False
+        # Each thread gets its own service instance (httplib2 is not thread-safe)
+        self._local = threading.local()
 
     def connect(self) -> None:
-        self._service = build("drive", "v3", credentials=self._credentials)
+        self._connected = True
         logger.info("Connected to Google Drive API")
 
     def _ensure_connected(self) -> Any:
-        if self._service is None:
+        if not self._connected:
             raise DownloadError("Not connected to Google Drive. Call connect() first.")
-        return self._service
+        if not hasattr(self._local, "service"):
+            self._local.service = build("drive", "v3", credentials=self._credentials)
+        return self._local.service
 
     def _handle_http_error(
         self, error: HttpError, file_id: Optional[str] = None
@@ -140,6 +145,11 @@ class GoogleDriveClient:
             return buffer.getvalue()
         except HttpError as e:
             self._handle_http_error(e, file_id=file_id)
+        except Exception as e:
+            raise DownloadError(
+                f"Network error downloading {file_id}: {e}",
+                file_id=file_id,
+            ) from e
 
     def download_file_to_path(self, file_id: str, destination: Path) -> None:
         data = self.download_file(file_id)

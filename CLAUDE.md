@@ -103,7 +103,7 @@ media: a.hasMany("Media", "observationId"),
 #### Media Model
 ```typescript
 url: a.url().required(),              // S3 URL after upload
-type: a.enum(['IMAGE', 'VIDEO']),     // Derived from file extension
+type: a.enum(['PHOTO', 'VIDEO']),     // Derived from file extension
 observationId: a.id().required(),     // FK to Observation.id
 isAvailableForPublicUse: a.boolean().required(),  // Default: false
 ```
@@ -267,7 +267,7 @@ mutation CreateMedia($input: CreateMediaInput!) {
 {
   "url": "https://bucket.s3.region.amazonaws.com/media/obs-id/12345.jpg",
   "observationId": "abc-123-def",
-  "type": "IMAGE",
+  "type": "PHOTO",
   "isAvailableForPublicUse": false
 }
 ```

@@ -36,7 +36,8 @@ def mock_service() -> MagicMock:
 def connected_client(
     client: GoogleDriveClient, mock_service: MagicMock
 ) -> GoogleDriveClient:
-    client._service = mock_service
+    client._connected = True
+    client._local.service = mock_service
     return client
 
 
@@ -58,7 +59,7 @@ class TestInit:
         assert client._rate_limiter is limiter
 
     def test_not_connected_initially(self, client: GoogleDriveClient) -> None:
-        assert client._service is None
+        assert client._connected is False
 
 
 class TestConnect:
@@ -70,11 +71,13 @@ class TestConnect:
         mock_build.return_value = mock_service
 
         client.connect()
+        # Service is built lazily on first _ensure_connected call
+        service = client._ensure_connected()
 
         mock_build.assert_called_once_with(
             "drive", "v3", credentials=client._credentials
         )
-        assert client._service is mock_service
+        assert service is mock_service
 
 
 class TestEnsureConnected:
