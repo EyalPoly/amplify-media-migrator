@@ -134,7 +134,8 @@ class MigrationEngine:
                         sequential_ids=parsed.sequential_ids,
                     )
 
-        self._progress.save()
+        if not dry_run:
+            self._progress.save()
 
         pending_ids = set(self._progress.get_pending_file_ids())
         files_to_process = [f for f in files if f.id in pending_ids]
@@ -146,7 +147,8 @@ class MigrationEngine:
         ]
         await asyncio.gather(*tasks)
 
-        self._progress.save()
+        if not dry_run:
+            self._progress.save()
 
     async def resume(
         self,
@@ -214,10 +216,11 @@ class MigrationEngine:
     ) -> None:
         async with self._get_semaphore():
             await self.process_file(file, dry_run, skip_existing)
-            async with self._get_save_lock():
-                self._processed_count += 1
-                if self._processed_count % SAVE_INTERVAL == 0:
-                    self._progress.save()
+            if not dry_run:
+                async with self._get_save_lock():
+                    self._processed_count += 1
+                    if self._processed_count % SAVE_INTERVAL == 0:
+                        self._progress.save()
 
     async def process_file(
         self,
@@ -287,13 +290,6 @@ class MigrationEngine:
                 return
 
         if dry_run:
-            self._progress.update_file(
-                file_id=file.id,
-                filename=file.name,
-                status=FileStatus.COMPLETED,
-                sequential_ids=parsed.sequential_ids,
-                observation_ids=[obs.id for obs in observations.values()],
-            )
             self._notify_progress(file.name, FileStatus.COMPLETED)
             return
 

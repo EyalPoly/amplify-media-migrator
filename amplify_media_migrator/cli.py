@@ -185,7 +185,7 @@ def _run_with_progress(
     try:
         from tqdm import tqdm
 
-        progress_bar = tqdm(desc=desc, unit="file")
+        progress_bar = tqdm(desc=desc, unit=" file")
 
         def on_progress(filename: str, status: FileStatus) -> None:
             progress_bar.update(1)

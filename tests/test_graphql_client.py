@@ -376,7 +376,7 @@ class TestCreateMedia:
                         "id": "media-1",
                         "url": "https://bucket.s3.amazonaws.com/media/obs-1/photo.jpg",
                         "observationId": "obs-1",
-                        "type": "IMAGE",
+                        "type": "PHOTO",
                         "isAvailableForPublicUse": False,
                     }
                 }
@@ -436,7 +436,7 @@ class TestCreateMedia:
                         "id": "m-1",
                         "url": "https://example.com/photo.jpg",
                         "observationId": "obs-1",
-                        "type": "IMAGE",
+                        "type": "PHOTO",
                         "isAvailableForPublicUse": False,
                     }
                 }
@@ -455,7 +455,7 @@ class TestCreateMedia:
             "input": {
                 "url": "https://example.com/photo.jpg",
                 "observationId": "obs-1",
-                "type": "IMAGE",
+                "type": "PHOTO",
                 "isAvailableForPublicUse": False,
             }
         }
@@ -475,7 +475,7 @@ class TestGetMediaByUrl:
                                 "id": "media-1",
                                 "url": "https://bucket.s3.amazonaws.com/media/obs-1/photo.jpg",
                                 "observationId": "obs-1",
-                                "type": "IMAGE",
+                                "type": "PHOTO",
                                 "isAvailableForPublicUse": False,
                             }
                         ]
@@ -530,7 +530,7 @@ class TestGetMediaByUrl:
                                     "id": "media-1",
                                     "url": "https://bucket.s3.amazonaws.com/media/obs-1/photo.jpg",
                                     "observationId": "obs-1",
-                                    "type": "IMAGE",
+                                    "type": "PHOTO",
                                     "isAvailableForPublicUse": False,
                                 }
                             ],
