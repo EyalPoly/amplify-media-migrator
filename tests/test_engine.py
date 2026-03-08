@@ -919,6 +919,86 @@ class TestProgressCallback:
 
         callback.assert_called_once_with("99999.jpg", FileStatus.ORPHAN)
 
+    def test_file_started_callback_called_before_completion(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        call_order: list = []
+        engine.set_file_started_callback(
+            lambda name: call_order.append(("started", name))
+        )
+        engine.set_progress_callback(
+            lambda name, status: call_order.append(("done", name, status))
+        )
+
+        file = _drive_file("f1", "6602.jpg")
+        obs = _observation("obs-1", 6602)
+        graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
+        drive_client.download_file.return_value = b"data"
+        storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
+        graphql_client.create_media.return_value = _media("m-1")
+
+        asyncio.run(engine.process_file(file))
+
+        assert call_order[0] == ("started", "6602.jpg")
+        assert call_order[1] == ("done", "6602.jpg", FileStatus.COMPLETED)
+
+    def test_total_callback_called_on_migrate(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        drive_client.list_files.return_value = [
+            _drive_file("f1", "6602.jpg"),
+            _drive_file("f2", "6603.jpg"),
+        ]
+        graphql_client.get_observations_by_sequential_ids.return_value = {}
+
+        totals: list = []
+        engine.set_total_callback(totals.append)
+
+        asyncio.run(engine.migrate("folder-1"))
+
+        assert totals == [2]
+
+    def test_total_callback_not_called_when_no_callback_set(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        graphql_client: MagicMock,
+    ) -> None:
+        drive_client.list_files.return_value = [_drive_file("f1", "6602.jpg")]
+        graphql_client.get_observations_by_sequential_ids.return_value = {}
+        # Should not raise even without a total callback set
+        asyncio.run(engine.migrate("folder-1"))
+
+    def test_file_started_callback_called_for_each_file(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        drive_client.list_files.return_value = [
+            _drive_file("f1", "6602.jpg"),
+            _drive_file("f2", "6603.jpg"),
+        ]
+        graphql_client.get_observations_by_sequential_ids.return_value = {}
+
+        started: list = []
+        engine.set_file_started_callback(started.append)
+
+        asyncio.run(engine.migrate("folder-1"))
+
+        assert sorted(started) == ["6602.jpg", "6603.jpg"]
+
 
 class TestEdgeCases:
     def test_empty_folder_scan(

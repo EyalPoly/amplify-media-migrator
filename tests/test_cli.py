@@ -397,6 +397,69 @@ class TestRunWithProgress:
         assert captured_callback is not None
         captured_callback("6602.jpg", FileStatus.COMPLETED)
 
+    def test_registers_total_and_file_started_callbacks(self) -> None:
+        async def coro() -> None:
+            pass
+
+        mock_engine = MagicMock(spec=MigrationEngine)
+        _run_with_progress(coro, mock_engine)
+
+        mock_engine.set_total_callback.assert_called_once()
+        mock_engine.set_file_started_callback.assert_called_once()
+
+    def test_total_callback_invocable_without_error(self) -> None:
+        """Total callback can be called after _run_with_progress sets it up."""
+        captured_total_cb = None
+
+        async def coro() -> None:
+            pass
+
+        mock_engine = MagicMock(spec=MigrationEngine)
+
+        def capture_total(cb: object) -> None:
+            nonlocal captured_total_cb
+            captured_total_cb = cb
+
+        mock_engine.set_total_callback.side_effect = capture_total
+        _run_with_progress(coro, mock_engine)
+
+        assert captured_total_cb is not None
+        # Should not raise
+        captured_total_cb(100)
+
+    def test_callbacks_do_not_raise_on_typical_sequence(self) -> None:
+        """started → progress callbacks fire without errors for mixed statuses."""
+        captured_started_cb = None
+        captured_progress_cb = None
+
+        async def coro() -> None:
+            pass
+
+        mock_engine = MagicMock(spec=MigrationEngine)
+
+        def capture_started(cb: object) -> None:
+            nonlocal captured_started_cb
+            captured_started_cb = cb
+
+        def capture_progress(cb: object) -> None:
+            nonlocal captured_progress_cb
+            captured_progress_cb = cb
+
+        mock_engine.set_file_started_callback.side_effect = capture_started
+        mock_engine.set_progress_callback.side_effect = capture_progress
+
+        _run_with_progress(coro, mock_engine)
+
+        assert captured_started_cb is not None
+        assert captured_progress_cb is not None
+
+        # Simulate a typical sequence: start, then finish with various statuses
+        for filename in ("6602.jpg", "9999.jpg", "bad.txt"):
+            captured_started_cb(filename)
+        captured_progress_cb("6602.jpg", FileStatus.COMPLETED)
+        captured_progress_cb("9999.jpg", FileStatus.ORPHAN)
+        captured_progress_cb("bad.txt", FileStatus.NEEDS_REVIEW)
+
 
 class TestPrintSummary:
     def test_prints_all_fields(self, runner: CliRunner) -> None:
