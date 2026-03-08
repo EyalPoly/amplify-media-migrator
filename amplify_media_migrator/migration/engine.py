@@ -47,11 +47,19 @@ class MigrationEngine:
         self._save_lock: Optional[asyncio.Lock] = None
         self._processed_count = 0
         self._on_progress: Optional[Callable[[str, FileStatus], None]] = None
+        self._on_total_known: Optional[Callable[[int], None]] = None
+        self._on_file_started: Optional[Callable[[str], None]] = None
 
     def set_progress_callback(
         self, callback: Callable[[str, FileStatus], None]
     ) -> None:
         self._on_progress = callback
+
+    def set_total_callback(self, callback: Callable[[int], None]) -> None:
+        self._on_total_known = callback
+
+    def set_file_started_callback(self, callback: Callable[[str], None]) -> None:
+        self._on_file_started = callback
 
     def _get_semaphore(self) -> asyncio.Semaphore:
         if self._semaphore is None:
@@ -115,6 +123,8 @@ class MigrationEngine:
             lambda: list(self._drive_client.list_files(folder_id))
         )
         self._progress.set_total_files(len(files))
+        if self._on_total_known:
+            self._on_total_known(len(files))
 
         for drive_file in files:
             if drive_file.id not in self._progress.files:
@@ -199,6 +209,9 @@ class MigrationEngine:
                         status=FileStatus.PENDING,
                     )
 
+        if self._on_total_known:
+            self._on_total_known(len(files_to_process))
+
         self._processed_count = 0
         tasks = [
             self._process_with_semaphore(f, dry_run, skip_existing)
@@ -228,6 +241,8 @@ class MigrationEngine:
         dry_run: bool = False,
         skip_existing: bool = False,
     ) -> None:
+        if self._on_file_started:
+            self._on_file_started(file.name)
         parsed = self._mapper.parse(file.name)
 
         if parsed.pattern == FilenamePattern.INVALID:

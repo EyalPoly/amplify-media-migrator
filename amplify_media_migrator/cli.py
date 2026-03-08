@@ -1,6 +1,9 @@
 import asyncio
 import json
 import logging
+import threading
+import time
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable
 
@@ -185,17 +188,63 @@ def _run_with_progress(
     try:
         from tqdm import tqdm
 
-        progress_bar = tqdm(desc=desc, unit=" file")
+        counts: dict = defaultdict(int)
+        active_files: list = []
+        lock = threading.Lock()
+
+        progress_bar = tqdm(desc=desc, unit=" file", dynamic_ncols=True)
+
+        def _refresh_postfix() -> None:
+            with lock:
+                parts = []
+                if counts["completed"]:
+                    parts.append(f"ok={counts['completed']}")
+                if counts["failed"]:
+                    parts.append(f"fail={counts['failed']}")
+                if counts["orphan"]:
+                    parts.append(f"orphan={counts['orphan']}")
+                if counts["needs_review"]:
+                    parts.append(f"review={counts['needs_review']}")
+                if active_files:
+                    parts.append(f"↓ {active_files[0]}")
+                progress_bar.set_postfix_str("  ".join(parts) if parts else "")
+
+        def on_total(total: int) -> None:
+            progress_bar.total = total
+            progress_bar.refresh()
+
+        def on_file_started(filename: str) -> None:
+            with lock:
+                active_files.append(filename)
+            _refresh_postfix()
 
         def on_progress(filename: str, status: FileStatus) -> None:
+            with lock:
+                if filename in active_files:
+                    active_files.remove(filename)
+                counts[status.value] += 1
             progress_bar.update(1)
-            progress_bar.set_postfix_str(f"{filename}: {status.value}")
+            _refresh_postfix()
 
+        engine.set_total_callback(on_total)
+        engine.set_file_started_callback(on_file_started)
         engine.set_progress_callback(on_progress)
+
+        stop_refresh = threading.Event()
+
+        def _ticker() -> None:
+            while not stop_refresh.is_set():
+                time.sleep(1)
+                _refresh_postfix()
+                progress_bar.refresh()
+
+        refresh_thread = threading.Thread(target=_ticker, daemon=True)
+        refresh_thread.start()
 
         try:
             asyncio.run(coro_fn())
         finally:
+            stop_refresh.set()
             progress_bar.close()
 
     except ImportError:
