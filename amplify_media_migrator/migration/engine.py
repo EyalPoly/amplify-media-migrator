@@ -127,22 +127,25 @@ class MigrationEngine:
             self._on_total_known(len(files))
 
         for drive_file in files:
-            if drive_file.id not in self._progress.files:
-                parsed = self._mapper.parse(drive_file.name)
-                if parsed.pattern == FilenamePattern.INVALID:
-                    self._progress.update_file(
-                        file_id=drive_file.id,
-                        filename=drive_file.name,
-                        status=FileStatus.NEEDS_REVIEW,
-                        error=parsed.error,
-                    )
-                else:
-                    self._progress.update_file(
-                        file_id=drive_file.id,
-                        filename=drive_file.name,
-                        status=FileStatus.PENDING,
-                        sequential_ids=parsed.sequential_ids,
-                    )
+            existing = self._progress.files.get(drive_file.id)
+            # Re-evaluate needs_review files in case they were renamed in Drive
+            if existing is not None and existing.status != FileStatus.NEEDS_REVIEW:
+                continue
+            parsed = self._mapper.parse(drive_file.name)
+            if parsed.pattern == FilenamePattern.INVALID:
+                self._progress.update_file(
+                    file_id=drive_file.id,
+                    filename=drive_file.name,
+                    status=FileStatus.NEEDS_REVIEW,
+                    error=parsed.error,
+                )
+            else:
+                self._progress.update_file(
+                    file_id=drive_file.id,
+                    filename=drive_file.name,
+                    status=FileStatus.PENDING,
+                    sequential_ids=parsed.sequential_ids,
+                )
 
         if not dry_run:
             self._progress.save()
