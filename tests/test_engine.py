@@ -928,6 +928,78 @@ class TestResume:
 
         asyncio.run(engine.resume("folder-1"))
 
+    def test_reprocesses_needs_review_files_after_rename(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        graphql_client: MagicMock,
+        storage_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        progress.update_file(
+            file_id="f1",
+            filename="bad.txt",
+            status=FileStatus.NEEDS_REVIEW,
+            error="Invalid filename pattern",
+        )
+        progress.save()
+
+        # Drive now returns a valid filename for the same file ID
+        drive_client.get_file_metadata.return_value = _drive_file("f1", "6602.jpg")
+        obs = _observation("obs-1", 6602)
+        graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
+        drive_client.download_file.return_value = b"data"
+        storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
+        graphql_client.create_media.return_value = _media("m-1")
+
+        asyncio.run(engine.resume("folder-1"))
+
+        assert progress.files["f1"].status == FileStatus.COMPLETED
+
+    def test_skips_needs_review_if_still_invalid(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        progress.update_file(
+            file_id="f1",
+            filename="bad.txt",
+            status=FileStatus.NEEDS_REVIEW,
+            error="Invalid filename pattern",
+        )
+        progress.save()
+
+        drive_client.get_file_metadata.return_value = _drive_file("f1", "still_bad.pdf")
+
+        asyncio.run(engine.resume("folder-1"))
+
+        assert progress.files["f1"].status == FileStatus.NEEDS_REVIEW
+
+    def test_needs_review_only_does_not_skip_early(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        """resume should not bail out early when only needs_review files exist."""
+        progress.load("folder-1")
+        progress.update_file(
+            file_id="f1",
+            filename="bad.txt",
+            status=FileStatus.NEEDS_REVIEW,
+            error="Invalid filename pattern",
+        )
+        progress.save()
+
+        drive_client.get_file_metadata.return_value = _drive_file("f1", "still_bad.pdf")
+
+        # Should complete without raising
+        asyncio.run(engine.resume("folder-1"))
+        drive_client.get_file_metadata.assert_called_once()
+
 
 class TestProgressCallback:
     def test_callback_called_on_completion(
