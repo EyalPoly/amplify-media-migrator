@@ -7,7 +7,7 @@ class MediaType(Enum):
 
 
 IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "gif"}
-VIDEO_EXTENSIONS = {"mp4", "mov", "avi"}
+VIDEO_EXTENSIONS = {"mp4", "mov", "avi", "wmv"}
 
 CONTENT_TYPES = {
     "jpg": "image/jpeg",
@@ -17,6 +17,7 @@ CONTENT_TYPES = {
     "mp4": "video/mp4",
     "mov": "video/quicktime",
     "avi": "video/x-msvideo",
+    "wmv": "video/x-ms-wmv",
 }
 
 

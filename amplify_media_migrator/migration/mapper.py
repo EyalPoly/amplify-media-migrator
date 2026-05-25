@@ -20,16 +20,13 @@ class ParsedFilename:
     error: Optional[str] = None
 
 
-VALID_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "mp4", "mov", "avi"}
+VALID_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "mp4", "mov", "avi", "wmv"}
 
-_SINGLE_RE = re.compile(r"^(\d+)\.(jpg|jpeg|png|gif|mp4|mov|avi)$", re.IGNORECASE)
-_MULTIPLE_RE = re.compile(
-    r"^(\d+)[a-zA-Z]\.(jpg|jpeg|png|gif|mp4|mov|avi)$", re.IGNORECASE
-)
-_MULTIPLE_HYPHEN_RE = re.compile(
-    r"^(\d+)-[a-zA-Z]\.(jpg|jpeg|png|gif|mp4|mov|avi)$", re.IGNORECASE
-)
-_RANGE_RE = re.compile(r"^(\d+)-(\d+)\.(jpg|jpeg|png|gif|mp4|mov|avi)$", re.IGNORECASE)
+_EXT = r"(jpg|jpeg|png|gif|mp4|mov|avi|wmv)"
+_SINGLE_RE = re.compile(rf"^(\d+)\.{_EXT}$", re.IGNORECASE)
+_MULTIPLE_RE = re.compile(rf"^(\d+)[a-zA-Z]\.{_EXT}$", re.IGNORECASE)
+_MULTIPLE_HYPHEN_RE = re.compile(rf"^(\d+)-[a-zA-Z]\.{_EXT}$", re.IGNORECASE)
+_RANGE_RE = re.compile(rf"^(\d+)-(\d+)\.{_EXT}$", re.IGNORECASE)
 
 
 class FilenameMapper:
