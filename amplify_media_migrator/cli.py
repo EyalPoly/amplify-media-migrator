@@ -364,7 +364,13 @@ def resume(
     _peek = ProgressTracker()
     if _peek.load(folder_id):
         _s = _peek.get_summary()
-        retryable = _s.failed + _s.partial + (_s.orphan if retry_orphans else 0)
+        retryable = (
+            _s.failed
+            + _s.partial
+            + _s.downloaded
+            + _s.uploaded
+            + (_s.orphan if retry_orphans else 0)
+        )
         click.echo(
             f"\nResuming: {_s.pending} pending  |  {retryable} retrying"
             f"  |  {_s.needs_review} needs-review check  |  {_s.completed} already done"
