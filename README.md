@@ -151,7 +151,6 @@ Options:
 | Flag | Default | Description |
 |---|---|---|
 | `--dry-run` | off | Validate without uploading |
-| `--skip-existing` | off | Skip files with existing Media records |
 | `--verbose` | off | Enable debug logging |
 
 ### 6. Check Status
