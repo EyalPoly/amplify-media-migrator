@@ -1,14 +1,13 @@
 name: Publish to PyPI
 
 on:
-  pull_request:
-    types: [closed]
+  push:
     branches:
       - main
 
 jobs:
   build-and-publish:
-    if: github.event.pull_request.merged == true
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -34,21 +33,11 @@ jobs:
     - name: Check if version bump should be skipped
       id: check_skip
       env:
-        PR_TITLE: ${{ github.event.pull_request.title }}
-        BASE_REF: ${{ github.event.pull_request.base.ref }}
+        COMMIT_MSG: ${{ github.event.head_commit.message }}
       run: |
-        # Check PR title for [skip bump]
-        if echo "$PR_TITLE" | grep -q "\[skip bump\]"; then
+        if echo "$COMMIT_MSG" | grep -qE "\[skip bump\]|dependabot"; then
           echo "skip=true" >> $GITHUB_OUTPUT
-          echo "Skipping version bump (found [skip bump] in PR title)"
-          exit 0
-        fi
-
-        # Check all commits in the PR for [skip bump]
-        MERGE_BASE=$(git merge-base "origin/$BASE_REF" HEAD)
-        if git log "$MERGE_BASE..HEAD" --pretty=%B | grep -q "\[skip bump\]"; then
-          echo "skip=true" >> $GITHUB_OUTPUT
-          echo "Skipping version bump (found [skip bump] in commit messages)"
+          echo "Skipping version bump"
         else
           echo "skip=false" >> $GITHUB_OUTPUT
         fi
