@@ -1,27 +1,29 @@
 name: Publish to PyPI
 
 on:
-  push:
+  workflow_dispatch:
+  pull_request:
+    types: [closed]
     branches:
       - main
 
 jobs:
   build-and-publish:
-    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     permissions:
       contents: write
       packages: write
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v4
       with:
         ref: main
-        token: ${{ secrets.GITHUB_TOKEN }}
+        token: ${{ secrets.PAT_TOKEN }}
         fetch-depth: 0
 
     - name: Set up Python
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@v5
       with:
         python-version: "3.11"
 
@@ -33,11 +35,29 @@ jobs:
     - name: Check if version bump should be skipped
       id: check_skip
       env:
-        COMMIT_MSG: ${{ github.event.head_commit.message }}
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        BASE_REF: ${{ github.event.pull_request.base.ref }}
+        EVENT_NAME: ${{ github.event_name }}
       run: |
-        if echo "$COMMIT_MSG" | grep -qE "\[skip bump\]|dependabot"; then
+        # Always skip bump on manual dispatch
+        if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
           echo "skip=true" >> $GITHUB_OUTPUT
-          echo "Skipping version bump"
+          echo "Skipping version bump (manual workflow dispatch)"
+          exit 0
+        fi
+
+        # Check PR title
+        if echo "$PR_TITLE" | grep -q "\[skip bump\]"; then
+          echo "skip=true" >> $GITHUB_OUTPUT
+          echo "Skipping version bump (found [skip bump] in PR title)"
+          exit 0
+        fi
+
+        # Check all commits in the PR (from merge base to HEAD)
+        MERGE_BASE=$(git merge-base "origin/$BASE_REF" HEAD)
+        if git log "$MERGE_BASE..HEAD" --pretty=%B | grep -q "\[skip bump\]"; then
+          echo "skip=true" >> $GITHUB_OUTPUT
+          echo "Skipping version bump (found [skip bump] in commit messages)"
         else
           echo "skip=false" >> $GITHUB_OUTPUT
         fi
@@ -61,23 +81,19 @@ jobs:
 
     - name: Commit version bump
       if: steps.check_skip.outputs.skip != 'true'
-      env:
-        NEW_VERSION: ${{ steps.bump_version.outputs.new_version }}
       run: |
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
         git add setup.py
-        git commit -m "Bump version to $NEW_VERSION [skip ci]"
-        git tag "v$NEW_VERSION"
+        git commit -m "Bump version to ${{ steps.bump_version.outputs.new_version }} [skip ci]"
+        git tag "v${{ steps.bump_version.outputs.new_version }}"
 
     - name: Create tag for manual version
       if: steps.check_skip.outputs.skip == 'true'
-      env:
-        CURRENT_VERSION: ${{ steps.current_version.outputs.new_version }}
       run: |
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
-        git tag "v$CURRENT_VERSION"
+        git tag "v${{ steps.current_version.outputs.new_version }}"
 
     - name: Push changes
       uses: ad-m/github-push-action@master
@@ -102,16 +118,14 @@ jobs:
         twine upload dist/*
 
     - name: Create GitHub Release
-      uses: softprops/action-gh-release@v3
-      env:
-        VERSION: ${{ steps.bump_version.outputs.new_version || steps.current_version.outputs.new_version }}
+      uses: softprops/action-gh-release@v1
       with:
-        tag_name: v${{ env.VERSION }}
-        name: Release v${{ env.VERSION }}
+        tag_name: v${{ steps.bump_version.outputs.new_version || steps.current_version.outputs.new_version }}
+        name: Release v${{ steps.bump_version.outputs.new_version || steps.current_version.outputs.new_version }}
         body: |
-          Automated release v${{ env.VERSION }}
+          Automated release v${{ steps.bump_version.outputs.new_version || steps.current_version.outputs.new_version }}
 
-          Published to PyPI: https://pypi.org/project/amplify-media-migrator/${{ env.VERSION }}/
+          Published to PyPI: https://pypi.org/project/amplify-media-migrator/${{ steps.bump_version.outputs.new_version || steps.current_version.outputs.new_version }}/
         files: |
           dist/*.whl
           dist/*.tar.gz
