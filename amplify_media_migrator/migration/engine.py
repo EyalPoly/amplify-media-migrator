@@ -91,21 +91,24 @@ class MigrationEngine:
             parsed = self._mapper.parse(drive_file.name)
             pattern_counts[parsed.pattern.value] += 1
 
-            if drive_file.id not in self._progress.files:
-                if parsed.pattern == FilenamePattern.INVALID:
-                    self._progress.update_file(
-                        file_id=drive_file.id,
-                        filename=drive_file.name,
-                        status=FileStatus.NEEDS_REVIEW,
-                        error=parsed.error,
-                    )
-                else:
-                    self._progress.update_file(
-                        file_id=drive_file.id,
-                        filename=drive_file.name,
-                        status=FileStatus.PENDING,
-                        sequential_ids=parsed.sequential_ids,
-                    )
+            existing = self._progress.files.get(drive_file.id)
+            if existing is not None and existing.status != FileStatus.NEEDS_REVIEW:
+                continue
+
+            if parsed.pattern == FilenamePattern.INVALID:
+                self._progress.update_file(
+                    file_id=drive_file.id,
+                    filename=drive_file.name,
+                    status=FileStatus.NEEDS_REVIEW,
+                    error=parsed.error,
+                )
+            else:
+                self._progress.update_file(
+                    file_id=drive_file.id,
+                    filename=drive_file.name,
+                    status=FileStatus.PENDING,
+                    sequential_ids=parsed.sequential_ids,
+                )
 
         self._progress.save()
         return pattern_counts
