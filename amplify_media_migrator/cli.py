@@ -206,7 +206,12 @@ def _run_with_progress(
                 if counts["needs_review"]:
                     parts.append(f"review={counts['needs_review']}")
                 if active_files:
-                    parts.append(f"↓ {active_files[0]}")
+                    suffix = (
+                        f" (+{len(active_files) - 1} more)"
+                        if len(active_files) > 1
+                        else ""
+                    )
+                    parts.append(f"↓ {active_files[-1]}{suffix}")
                 progress_bar.set_postfix_str("  ".join(parts) if parts else "")
 
         def on_total(total: int) -> None:
