@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import logging
 import random
 from typing import Callable, Dict, List, Optional
@@ -119,6 +120,9 @@ class MigrationEngine:
         dry_run: bool = False,
     ) -> None:
         self._reset_run_state()
+        asyncio.get_running_loop().set_default_executor(
+            concurrent.futures.ThreadPoolExecutor(max_workers=self._concurrency)
+        )
         self._progress.load(folder_id)
 
         files = await asyncio.to_thread(
@@ -169,6 +173,9 @@ class MigrationEngine:
         retry_orphans: bool = False,
     ) -> None:
         self._reset_run_state()
+        asyncio.get_running_loop().set_default_executor(
+            concurrent.futures.ThreadPoolExecutor(max_workers=self._concurrency)
+        )
         if not self._progress.load(folder_id):
             raise MigratorError(f"No progress file found for folder {folder_id}")
 
