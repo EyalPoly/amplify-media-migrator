@@ -243,6 +243,14 @@ class ProgressTracker:
             fid for fid, fp in self._files.items() if fp.status == FileStatus.ORPHAN
         ]
 
+    def get_interrupted_file_ids(self) -> List[str]:
+        """Return files stuck in transient mid-flight states from a killed run."""
+        return [
+            fid
+            for fid, fp in self._files.items()
+            if fp.status in (FileStatus.DOWNLOADED, FileStatus.UPLOADED)
+        ]
+
     def export_to_json(self, status: FileStatus, output_path: Path) -> int:
         matching = {
             fid: _file_progress_to_dict(fp)

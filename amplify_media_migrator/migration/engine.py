@@ -175,11 +175,12 @@ class MigrationEngine:
         pending_ids = set(self._progress.get_pending_file_ids())
         failed_ids = set(self._progress.get_failed_file_ids())
         partial_ids = set(self._progress.get_partial_file_ids())
+        interrupted_ids = set(self._progress.get_interrupted_file_ids())
         needs_review_ids = set(self._progress.get_needs_review_file_ids())
         orphan_ids = (
             set(self._progress.get_orphan_file_ids()) if retry_orphans else set()
         )
-        retryable_ids = failed_ids | partial_ids | orphan_ids
+        retryable_ids = failed_ids | partial_ids | interrupted_ids | orphan_ids
         file_ids_to_process = pending_ids | retryable_ids
 
         if not file_ids_to_process and not needs_review_ids:
@@ -340,42 +341,49 @@ class MigrationEngine:
             self._notify_progress(file.name, FileStatus.COMPLETED)
             return
 
-        try:
-            data = await self._download_with_retry(file.id)
-        except AuthenticationError:
-            raise
-        except MigratorError as e:
-            self._mark_failed(file, parsed, f"Download failed: {e}")
-            return
+        # If this file was previously uploaded (interrupted after S3 upload but
+        # before media record creation), reuse the stored S3 URL and skip
+        # the download/upload entirely.
+        stored = self._progress.get_file(file.id)
+        if stored and stored.status == FileStatus.UPLOADED and stored.s3_url:
+            s3_url = stored.s3_url
+        else:
+            try:
+                data = await self._download_with_retry(file.id)
+            except AuthenticationError:
+                raise
+            except MigratorError as e:
+                self._mark_failed(file, parsed, f"Download failed: {e}")
+                return
 
-        self._progress.update_file(
-            file_id=file.id,
-            filename=file.name,
-            status=FileStatus.DOWNLOADED,
-            sequential_ids=parsed.sequential_ids,
-        )
-
-        content_type = get_content_type(parsed.extension)
-        try:
-            s3_url = await asyncio.to_thread(
-                self._storage_client.upload_file,
-                data,
-                s3_key,
-                content_type,
+            self._progress.update_file(
+                file_id=file.id,
+                filename=file.name,
+                status=FileStatus.DOWNLOADED,
+                sequential_ids=parsed.sequential_ids,
             )
-        except AuthenticationError:
-            raise
-        except MigratorError as e:
-            self._mark_failed(file, parsed, f"Upload failed: {e}")
-            return
 
-        self._progress.update_file(
-            file_id=file.id,
-            filename=file.name,
-            status=FileStatus.UPLOADED,
-            sequential_ids=parsed.sequential_ids,
-            s3_url=s3_url,
-        )
+            content_type = get_content_type(parsed.extension)
+            try:
+                s3_url = await asyncio.to_thread(
+                    self._storage_client.upload_file,
+                    data,
+                    s3_key,
+                    content_type,
+                )
+            except AuthenticationError:
+                raise
+            except MigratorError as e:
+                self._mark_failed(file, parsed, f"Upload failed: {e}")
+                return
+
+            self._progress.update_file(
+                file_id=file.id,
+                filename=file.name,
+                status=FileStatus.UPLOADED,
+                sequential_ids=parsed.sequential_ids,
+                s3_url=s3_url,
+            )
 
         media_type = get_media_type(parsed.extension)
         media_ids: List[str] = []
