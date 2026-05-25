@@ -26,6 +26,9 @@ _SINGLE_RE = re.compile(r"^(\d+)\.(jpg|jpeg|png|gif|mp4|mov|avi)$", re.IGNORECAS
 _MULTIPLE_RE = re.compile(
     r"^(\d+)[a-zA-Z]\.(jpg|jpeg|png|gif|mp4|mov|avi)$", re.IGNORECASE
 )
+_MULTIPLE_HYPHEN_RE = re.compile(
+    r"^(\d+)-[a-zA-Z]\.(jpg|jpeg|png|gif|mp4|mov|avi)$", re.IGNORECASE
+)
 _RANGE_RE = re.compile(r"^(\d+)-(\d+)\.(jpg|jpeg|png|gif|mp4|mov|avi)$", re.IGNORECASE)
 
 
@@ -49,6 +52,17 @@ class FilenameMapper:
             return ParsedFilename(
                 pattern=FilenamePattern.RANGE,
                 sequential_ids=ids,
+                extension=ext,
+                original_filename=filename,
+            )
+
+        match = _MULTIPLE_HYPHEN_RE.match(filename)
+        if match:
+            seq_id = int(match.group(1))
+            ext = match.group(2).lower()
+            return ParsedFilename(
+                pattern=FilenamePattern.MULTIPLE,
+                sequential_ids=[seq_id],
                 extension=ext,
                 original_filename=filename,
             )

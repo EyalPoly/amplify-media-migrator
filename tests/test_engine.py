@@ -78,7 +78,9 @@ def storage_client() -> MagicMock:
 
 @pytest.fixture
 def graphql_client() -> MagicMock:
-    return MagicMock(spec=GraphQLClient)
+    mock = MagicMock(spec=GraphQLClient)
+    mock.get_media_by_url.return_value = None
+    return mock
 
 
 @pytest.fixture
@@ -432,7 +434,7 @@ class TestDryRun:
         assert "f1" not in progress.files
 
 
-class TestSkipExisting:
+class TestDuplicateCheck:
     def test_skips_when_media_exists(
         self,
         engine: MigrationEngine,
@@ -447,7 +449,7 @@ class TestSkipExisting:
         graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
         graphql_client.get_media_by_url.return_value = _media("existing-m")
 
-        asyncio.run(engine.process_file(file, skip_existing=True))
+        asyncio.run(engine.process_file(file))
 
         drive_client.download_file.assert_not_called()
         assert progress.files["f1"].status == FileStatus.COMPLETED
@@ -472,7 +474,7 @@ class TestSkipExisting:
         )
         graphql_client.create_media.return_value = _media("m-1")
 
-        asyncio.run(engine.process_file(file, skip_existing=True))
+        asyncio.run(engine.process_file(file))
 
         drive_client.download_file.assert_called_once()
         assert progress.files["f1"].status == FileStatus.COMPLETED
@@ -1185,7 +1187,7 @@ class TestEdgeCases:
             True,
         )
 
-    def test_skip_existing_query_error_falls_through(
+    def test_duplicate_check_query_error_falls_through(
         self,
         engine: MigrationEngine,
         drive_client: MagicMock,
@@ -1206,12 +1208,12 @@ class TestEdgeCases:
         storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
         graphql_client.create_media.return_value = _media("m-1")
 
-        asyncio.run(engine.process_file(file, skip_existing=True))
+        asyncio.run(engine.process_file(file))
 
         drive_client.download_file.assert_called_once()
         assert progress.files["f1"].status == FileStatus.COMPLETED
 
-    def test_skip_existing_auth_error_propagates(
+    def test_duplicate_check_auth_error_propagates(
         self,
         engine: MigrationEngine,
         graphql_client: MagicMock,
@@ -1227,7 +1229,7 @@ class TestEdgeCases:
         )
 
         with pytest.raises(AuthenticationError):
-            asyncio.run(engine.process_file(file, skip_existing=True))
+            asyncio.run(engine.process_file(file))
 
     def test_large_range_creates_many_media_records(
         self,

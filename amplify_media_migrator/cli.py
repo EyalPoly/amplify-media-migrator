@@ -306,14 +306,10 @@ def scan(folder_id: str) -> None:
 @main.command()
 @click.option("--folder-id", required=True, help="Google Drive folder ID")
 @click.option("--dry-run", is_flag=True, help="Validate without uploading")
-@click.option(
-    "--skip-existing", is_flag=True, help="Skip files with existing Media records"
-)
 @click.option("--verbose", is_flag=True, help="Enable debug logging")
 def migrate(
     folder_id: str,
     dry_run: bool,
-    skip_existing: bool,
     verbose: bool,
 ) -> None:
     """Run the full media migration."""
@@ -332,7 +328,7 @@ def migrate(
 
     try:
         _run_with_progress(
-            lambda: engine.migrate(folder_id, dry_run, skip_existing),
+            lambda: engine.migrate(folder_id, dry_run),
             engine,
             desc="Migrating",
         )
@@ -346,14 +342,10 @@ def migrate(
 @main.command()
 @click.option("--folder-id", required=True, help="Google Drive folder ID")
 @click.option("--dry-run", is_flag=True, help="Validate without uploading")
-@click.option(
-    "--skip-existing", is_flag=True, help="Skip files with existing Media records"
-)
 @click.option("--verbose", is_flag=True, help="Enable debug logging")
 def resume(
     folder_id: str,
     dry_run: bool,
-    skip_existing: bool,
     verbose: bool,
 ) -> None:
     """Resume an interrupted migration."""
@@ -369,7 +361,7 @@ def resume(
 
     try:
         _run_with_progress(
-            lambda: engine.resume(folder_id, dry_run, skip_existing),
+            lambda: engine.resume(folder_id, dry_run),
             engine,
             desc="Resuming",
         )
