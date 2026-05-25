@@ -64,6 +64,32 @@ class TestMultiplePattern:
         assert result.sequential_ids == [6602]
         assert result.extension == "mov"
 
+    def test_hyphen_letter_uppercase(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("131-A.jpg")
+        assert result.pattern == FilenamePattern.MULTIPLE
+        assert result.sequential_ids == [131]
+        assert result.extension == "jpg"
+        assert result.error is None
+
+    def test_hyphen_letter_lowercase(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("131-a.jpg")
+        assert result.pattern == FilenamePattern.MULTIPLE
+        assert result.sequential_ids == [131]
+
+    def test_hyphen_letter_various(self, mapper: FilenameMapper) -> None:
+        for letter in ["A", "B", "Z", "a", "b", "z"]:
+            result = mapper.parse(f"6602-{letter}.png")
+            assert result.pattern == FilenamePattern.MULTIPLE
+            assert result.sequential_ids == [6602]
+
+    def test_hyphen_letter_case_insensitive_extension(
+        self, mapper: FilenameMapper
+    ) -> None:
+        result = mapper.parse("131-A.MOV")
+        assert result.pattern == FilenamePattern.MULTIPLE
+        assert result.sequential_ids == [131]
+        assert result.extension == "mov"
+
 
 class TestRangePattern:
     def test_basic(self, mapper: FilenameMapper) -> None:

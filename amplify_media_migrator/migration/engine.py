@@ -114,7 +114,6 @@ class MigrationEngine:
         self,
         folder_id: str,
         dry_run: bool = False,
-        skip_existing: bool = False,
     ) -> None:
         self._reset_run_state()
         self._progress.load(folder_id)
@@ -154,10 +153,7 @@ class MigrationEngine:
         files_to_process = [f for f in files if f.id in pending_ids]
 
         self._processed_count = 0
-        tasks = [
-            self._process_with_semaphore(f, dry_run, skip_existing)
-            for f in files_to_process
-        ]
+        tasks = [self._process_with_semaphore(f, dry_run) for f in files_to_process]
         await asyncio.gather(*tasks)
 
         if not dry_run:
@@ -167,7 +163,6 @@ class MigrationEngine:
         self,
         folder_id: str,
         dry_run: bool = False,
-        skip_existing: bool = False,
     ) -> None:
         self._reset_run_state()
         if not self._progress.load(folder_id):
@@ -237,10 +232,7 @@ class MigrationEngine:
             self._on_total_known(len(files_to_process))
 
         self._processed_count = 0
-        tasks = [
-            self._process_with_semaphore(f, dry_run, skip_existing)
-            for f in files_to_process
-        ]
+        tasks = [self._process_with_semaphore(f, dry_run) for f in files_to_process]
         await asyncio.gather(*tasks)
 
         self._progress.save()
@@ -249,10 +241,9 @@ class MigrationEngine:
         self,
         file: DriveFile,
         dry_run: bool,
-        skip_existing: bool,
     ) -> None:
         async with self._get_semaphore():
-            await self.process_file(file, dry_run, skip_existing)
+            await self.process_file(file, dry_run)
             if not dry_run:
                 async with self._get_save_lock():
                     self._processed_count += 1
@@ -263,7 +254,6 @@ class MigrationEngine:
         self,
         file: DriveFile,
         dry_run: bool = False,
-        skip_existing: bool = False,
     ) -> None:
         if self._on_file_started:
             self._on_file_started(file.name)
@@ -305,28 +295,27 @@ class MigrationEngine:
         s3_key = self._mapper.build_s3_key(first_obs.id, file.name)
         s3_url = self._storage_client.get_url(s3_key)
 
-        if skip_existing:
-            try:
-                existing_media = await asyncio.to_thread(
-                    self._graphql_client.get_media_by_url, s3_url
-                )
-            except AuthenticationError:
-                raise
-            except MigratorError as e:
-                logger.warning("Skip-existing check failed for %s: %s", file.name, e)
-                existing_media = None
+        try:
+            existing_media = await asyncio.to_thread(
+                self._graphql_client.get_media_by_url, s3_url
+            )
+        except AuthenticationError:
+            raise
+        except MigratorError as e:
+            logger.warning("Duplicate check failed for %s: %s", file.name, e)
+            existing_media = None
 
-            if existing_media:
-                self._progress.update_file(
-                    file_id=file.id,
-                    filename=file.name,
-                    status=FileStatus.COMPLETED,
-                    sequential_ids=parsed.sequential_ids,
-                    observation_ids=[obs.id for obs in observations.values()],
-                    s3_url=s3_url,
-                )
-                self._notify_progress(file.name, FileStatus.COMPLETED)
-                return
+        if existing_media:
+            self._progress.update_file(
+                file_id=file.id,
+                filename=file.name,
+                status=FileStatus.COMPLETED,
+                sequential_ids=parsed.sequential_ids,
+                observation_ids=[obs.id for obs in observations.values()],
+                s3_url=s3_url,
+            )
+            self._notify_progress(file.name, FileStatus.COMPLETED)
+            return
 
         if dry_run:
             self._notify_progress(file.name, FileStatus.COMPLETED)
