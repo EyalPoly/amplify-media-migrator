@@ -1,5 +1,5 @@
 # Core dependencies
-amplify-auth>=0.1.0
+amplify-auth>=0.1.1
 click>=8.1.0
 boto3>=1.34.0
 pycognito>=2024.5.1
