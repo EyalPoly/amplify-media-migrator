@@ -361,7 +361,16 @@ def resume(
     id_token = _authenticate_cognito(cfg)
     engine = _create_engine(cfg, drive_client, id_token)
 
-    click.echo(f"Resuming migration for folder {folder_id}...")
+    _peek = ProgressTracker()
+    if _peek.load(folder_id):
+        _s = _peek.get_summary()
+        retryable = _s.failed + _s.partial + (_s.orphan if retry_orphans else 0)
+        click.echo(
+            f"\nResuming: {_s.pending} pending  |  {retryable} retrying"
+            f"  |  {_s.needs_review} needs-review check  |  {_s.completed} already done"
+        )
+
+    click.echo(f"Starting resume for folder {folder_id}...\n")
 
     try:
         _run_with_progress(
