@@ -186,63 +186,75 @@ class MigrationEngine:
             logger.info("No files to resume")
             return
 
+        # Build DriveFile objects from stored progress data — no API call needed
+        # since we already have id and name; only needs_review files require a
+        # fresh metadata fetch to detect renames.
         files_to_process: List[DriveFile] = []
         for file_id in file_ids_to_process:
-            try:
-                drive_file = await asyncio.to_thread(
-                    self._drive_client.get_file_metadata, file_id
+            fp = self._progress.get_file(file_id)
+            if fp is None:
+                logger.warning(
+                    "No stored progress entry for file %s, skipping", file_id
                 )
-                files_to_process.append(drive_file)
-            except MigratorError as e:
-                logger.warning("Could not fetch metadata for %s: %s", file_id, e)
-                fp = self._progress.get_file(file_id)
-                filename = fp.filename if fp else file_id
+                continue
+            files_to_process.append(
+                DriveFile(id=file_id, name=fp.filename, mime_type="", size=0)
+            )
+
+        for file_id in retryable_ids:
+            fp = self._progress.get_file(file_id)
+            if fp:
                 self._progress.update_file(
                     file_id=file_id,
-                    filename=filename,
-                    status=FileStatus.FAILED,
-                    error=f"Could not fetch file metadata: {e}",
+                    filename=fp.filename,
+                    status=FileStatus.PENDING,
                 )
 
-        fetched_ids = {f.id for f in files_to_process}
-        for file_id in retryable_ids:
-            if file_id in fetched_ids:
-                fp = self._progress.get_file(file_id)
-                if fp:
-                    self._progress.update_file(
-                        file_id=file_id,
-                        filename=fp.filename,
-                        status=FileStatus.PENDING,
-                    )
-
-        # Re-evaluate needs_review files — they may have been renamed in Drive
-        for file_id in needs_review_ids:
-            try:
-                drive_file = await asyncio.to_thread(
-                    self._drive_client.get_file_metadata, file_id
-                )
-                parsed = self._mapper.parse(drive_file.name)
-                if parsed.pattern != FilenamePattern.INVALID:
-                    self._progress.update_file(
-                        file_id=file_id,
-                        filename=drive_file.name,
-                        status=FileStatus.PENDING,
-                        sequential_ids=parsed.sequential_ids,
-                    )
+        # Re-evaluate needs_review files in parallel — they may have been renamed in Drive
+        if needs_review_ids:
+            logger.info(
+                "Checking %d needs_review files for renames...", len(needs_review_ids)
+            )
+            review_tasks = [
+                self._fetch_and_evaluate_needs_review(file_id)
+                for file_id in needs_review_ids
+            ]
+            review_results = await asyncio.gather(*review_tasks)
+            for drive_file in review_results:
+                if drive_file is not None:
                     files_to_process.append(drive_file)
-            except MigratorError as e:
-                logger.warning(
-                    "Could not fetch metadata for needs_review file %s: %s", file_id, e
-                )
 
         if self._on_total_known:
             self._on_total_known(len(files_to_process))
 
+        logger.info("Starting processing of %d files...", len(files_to_process))
         self._processed_count = 0
         tasks = [self._process_with_semaphore(f, dry_run) for f in files_to_process]
         await asyncio.gather(*tasks)
 
         self._progress.save()
+
+    async def _fetch_and_evaluate_needs_review(
+        self, file_id: str
+    ) -> Optional[DriveFile]:
+        try:
+            drive_file = await asyncio.to_thread(
+                self._drive_client.get_file_metadata, file_id
+            )
+            parsed = self._mapper.parse(drive_file.name)
+            if parsed.pattern != FilenamePattern.INVALID:
+                self._progress.update_file(
+                    file_id=file_id,
+                    filename=drive_file.name,
+                    status=FileStatus.PENDING,
+                    sequential_ids=parsed.sequential_ids,
+                )
+                return drive_file
+        except MigratorError as e:
+            logger.warning(
+                "Could not fetch metadata for needs_review file %s: %s", file_id, e
+            )
+        return None
 
     async def _process_with_semaphore(
         self,

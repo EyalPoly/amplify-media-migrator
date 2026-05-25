@@ -729,7 +729,7 @@ class TestResumeCommand:
 
         result = runner.invoke(main, ["resume", "--folder-id", "test"])
         assert result.exit_code == 0
-        assert "Resuming migration" in result.output
+        assert "Starting resume" in result.output
         assert "Migration Summary" in result.output
 
     @patch("amplify_media_migrator.cli._run_with_progress")
@@ -794,7 +794,7 @@ class TestResumeCommand:
             main, ["resume", "--folder-id", "test", "--retry-orphans"]
         )
         assert result.exit_code == 0
-        assert "Resuming migration" in result.output
+        assert "Starting resume" in result.output
 
 
 class TestMigrateVerbose:

@@ -1407,29 +1407,20 @@ class TestEdgeCases:
         assert progress.files["f2"].status == FileStatus.NEEDS_REVIEW
         assert drive_client.download_file.call_count == 1
 
-    def test_resume_metadata_fetch_failure(
+    def test_resume_skips_file_id_with_no_progress_entry(
         self,
         engine: MigrationEngine,
         drive_client: MagicMock,
         progress: ProgressTracker,
     ) -> None:
-        """When metadata fetch fails during resume, file is marked failed."""
+        """File IDs with no stored progress entry are silently skipped."""
         progress.load("folder-1")
-        progress.update_file(
-            file_id="f1",
-            filename="6602.jpg",
-            status=FileStatus.PENDING,
-        )
         progress.save()
 
-        drive_client.get_file_metadata.side_effect = DownloadError(
-            "File not found", file_id="f1"
-        )
+        with patch.object(progress, "get_pending_file_ids", return_value=["ghost-id"]):
+            asyncio.run(engine.resume("folder-1"))
 
-        asyncio.run(engine.resume("folder-1"))
-
-        assert progress.files["f1"].status == FileStatus.FAILED
-        assert "Could not fetch file metadata" in (progress.files["f1"].error or "")
+        assert "ghost-id" not in progress.files
 
     def test_case_insensitive_extension(
         self,
