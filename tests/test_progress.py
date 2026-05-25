@@ -183,6 +183,24 @@ class TestPartialFileIds:
         assert ids == []
 
 
+class TestOrphanFileIds:
+    def test_orphan_ids(self, tracker: ProgressTracker) -> None:
+        tracker.load("folder1")
+        tracker.update_file("f1", "1.jpg", FileStatus.ORPHAN)
+        tracker.update_file("f2", "2.jpg", FileStatus.COMPLETED)
+        tracker.update_file("f3", "3.jpg", FileStatus.ORPHAN)
+
+        ids = tracker.get_orphan_file_ids()
+        assert sorted(ids) == ["f1", "f3"]
+
+    def test_orphan_ids_empty(self, tracker: ProgressTracker) -> None:
+        tracker.load("folder1")
+        tracker.update_file("f1", "1.jpg", FileStatus.COMPLETED)
+
+        ids = tracker.get_orphan_file_ids()
+        assert ids == []
+
+
 class TestDownloadedUploadedStatuses:
     def test_downloaded_in_summary(self, tracker: ProgressTracker) -> None:
         tracker.load("folder1")

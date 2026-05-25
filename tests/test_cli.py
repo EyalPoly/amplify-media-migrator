@@ -764,6 +764,38 @@ class TestResumeCommand:
         assert result.exit_code == 0
         mock_setup_logging.assert_called_once_with(level="DEBUG")
 
+    @patch("amplify_media_migrator.cli._run_with_progress")
+    @patch("amplify_media_migrator.cli._create_engine")
+    @patch("amplify_media_migrator.cli._authenticate_cognito")
+    @patch("amplify_media_migrator.cli._authenticate_google")
+    @patch("amplify_media_migrator.cli._load_config")
+    def test_resume_retry_orphans_flag(
+        self,
+        mock_load: MagicMock,
+        mock_auth_g: MagicMock,
+        mock_auth_c: MagicMock,
+        mock_create: MagicMock,
+        mock_run_progress: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        mock_engine = MagicMock()
+        mock_engine.get_summary.return_value = {
+            "total": 5,
+            "completed": 5,
+            "failed": 0,
+            "orphan": 0,
+            "needs_review": 0,
+            "partial": 0,
+            "pending": 0,
+        }
+        mock_create.return_value = mock_engine
+
+        result = runner.invoke(
+            main, ["resume", "--folder-id", "test", "--retry-orphans"]
+        )
+        assert result.exit_code == 0
+        assert "Resuming migration" in result.output
+
 
 class TestMigrateVerbose:
     @patch("amplify_media_migrator.cli._run_with_progress")

@@ -342,10 +342,14 @@ def migrate(
 @main.command()
 @click.option("--folder-id", required=True, help="Google Drive folder ID")
 @click.option("--dry-run", is_flag=True, help="Validate without uploading")
+@click.option(
+    "--retry-orphans", is_flag=True, help="Retry files previously marked as orphan"
+)
 @click.option("--verbose", is_flag=True, help="Enable debug logging")
 def resume(
     folder_id: str,
     dry_run: bool,
+    retry_orphans: bool,
     verbose: bool,
 ) -> None:
     """Resume an interrupted migration."""
@@ -361,7 +365,7 @@ def resume(
 
     try:
         _run_with_progress(
-            lambda: engine.resume(folder_id, dry_run),
+            lambda: engine.resume(folder_id, dry_run, retry_orphans),
             engine,
             desc="Resuming",
         )
