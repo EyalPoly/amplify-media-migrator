@@ -1002,6 +1002,80 @@ class TestResume:
         asyncio.run(engine.resume("folder-1"))
         drive_client.get_file_metadata.assert_called_once()
 
+    def test_retries_orphan_files_when_flag_set(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        graphql_client: MagicMock,
+        storage_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        progress.update_file(
+            file_id="f1",
+            filename="144.jpg",
+            status=FileStatus.ORPHAN,
+            sequential_ids=[144],
+            error="No matching observations found",
+        )
+        progress.save()
+
+        drive_client.get_file_metadata.return_value = _drive_file("f1", "144.jpg")
+        obs = _observation("obs-144", 144)
+        graphql_client.get_observations_by_sequential_ids.return_value = {144: obs}
+        drive_client.download_file.return_value = b"data"
+        storage_client.upload_file.return_value = "https://bucket/media/obs-144/144.jpg"
+        graphql_client.create_media.return_value = _media("m-1", obs_id="obs-144")
+
+        asyncio.run(engine.resume("folder-1", retry_orphans=True))
+
+        assert progress.files["f1"].status == FileStatus.COMPLETED
+
+    def test_skips_orphan_files_by_default(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        progress.update_file(
+            file_id="f1",
+            filename="144.jpg",
+            status=FileStatus.ORPHAN,
+            sequential_ids=[144],
+            error="No matching observations found",
+        )
+        progress.save()
+
+        asyncio.run(engine.resume("folder-1"))
+
+        assert progress.files["f1"].status == FileStatus.ORPHAN
+        drive_client.get_file_metadata.assert_not_called()
+
+    def test_retry_orphans_stays_orphan_when_still_not_found(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        progress.update_file(
+            file_id="f1",
+            filename="144.jpg",
+            status=FileStatus.ORPHAN,
+            sequential_ids=[144],
+            error="No matching observations found",
+        )
+        progress.save()
+
+        drive_client.get_file_metadata.return_value = _drive_file("f1", "144.jpg")
+        graphql_client.get_observations_by_sequential_ids.return_value = {}
+
+        asyncio.run(engine.resume("folder-1", retry_orphans=True))
+
+        assert progress.files["f1"].status == FileStatus.ORPHAN
+
 
 class TestProgressCallback:
     def test_callback_called_on_completion(

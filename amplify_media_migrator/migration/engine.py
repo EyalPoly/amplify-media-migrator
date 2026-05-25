@@ -166,6 +166,7 @@ class MigrationEngine:
         self,
         folder_id: str,
         dry_run: bool = False,
+        retry_orphans: bool = False,
     ) -> None:
         self._reset_run_state()
         if not self._progress.load(folder_id):
@@ -175,7 +176,10 @@ class MigrationEngine:
         failed_ids = set(self._progress.get_failed_file_ids())
         partial_ids = set(self._progress.get_partial_file_ids())
         needs_review_ids = set(self._progress.get_needs_review_file_ids())
-        retryable_ids = failed_ids | partial_ids
+        orphan_ids = (
+            set(self._progress.get_orphan_file_ids()) if retry_orphans else set()
+        )
+        retryable_ids = failed_ids | partial_ids | orphan_ids
         file_ids_to_process = pending_ids | retryable_ids
 
         if not file_ids_to_process and not needs_review_ids:

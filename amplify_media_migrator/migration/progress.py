@@ -238,6 +238,11 @@ class ProgressTracker:
             if fp.status == FileStatus.NEEDS_REVIEW
         ]
 
+    def get_orphan_file_ids(self) -> List[str]:
+        return [
+            fid for fid, fp in self._files.items() if fp.status == FileStatus.ORPHAN
+        ]
+
     def export_to_json(self, status: FileStatus, output_path: Path) -> int:
         matching = {
             fid: _file_progress_to_dict(fp)

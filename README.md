@@ -169,6 +169,12 @@ Resume an interrupted migration (retries failed/pending files):
 amplify-media-migrator resume --folder-id FOLDER_ID
 ```
 
+To also retry files previously marked as `orphan` (e.g. after fixing a misconfigured API endpoint or after observations were added to the database):
+
+```bash
+amplify-media-migrator resume --folder-id FOLDER_ID --retry-orphans
+```
+
 ### 8. Export
 
 Export files by status for offline review:
@@ -200,7 +206,7 @@ Files that don't match any pattern are marked as `needs_review`.
 | `scan --folder-id ID` | Scan folder and validate file patterns |
 | `review --folder-id ID` | Show files needing manual review |
 | `migrate --folder-id ID` | Run full migration |
-| `resume --folder-id ID` | Resume interrupted migration |
+| `resume --folder-id ID [--retry-orphans]` | Resume interrupted migration; `--retry-orphans` re-processes orphan files |
 | `status --folder-id ID` | Show migration progress |
 | `export --folder-id ID --status STATUS --output FILE` | Export files by status |
 
