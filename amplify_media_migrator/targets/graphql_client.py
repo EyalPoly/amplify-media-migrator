@@ -54,7 +54,7 @@ mutation CreateMedia($input: CreateMediaInput!) {
 """
 
 _QUERY_MEDIA_BY_URL = """
-query GetMediaByUrl($url: AWSUrl!, $nextToken: String) {
+query GetMediaByUrl($url: String!, $nextToken: String) {
   listMedia(filter: { url: { eq: $url } }, limit: 10000, nextToken: $nextToken) {
     items {
       id
