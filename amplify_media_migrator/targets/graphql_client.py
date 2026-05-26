@@ -1,8 +1,10 @@
 import logging
+import threading
 from dataclasses import dataclass
 from typing import Any, Dict, List, NoReturn, Optional
 
 import requests
+import requests.adapters
 
 from ..utils.exceptions import (
     AuthenticationError,
@@ -78,6 +80,17 @@ class GraphQLClient:
         self._api_endpoint = api_endpoint
         self._region = region
         self._id_token: Optional[str] = None
+        self._local = threading.local()
+
+    def _get_session(self) -> requests.Session:
+        if not hasattr(self._local, "session"):
+            session = requests.Session()
+            # Each thread keeps one persistent HTTPS connection to AppSync,
+            # eliminating per-request TLS handshake overhead.
+            adapter = requests.adapters.HTTPAdapter(pool_connections=1, pool_maxsize=1)
+            session.mount("https://", adapter)
+            self._local.session = session
+        return self._local.session
 
     def connect(self, id_token: str) -> None:
         self._id_token = id_token
@@ -130,7 +143,7 @@ class GraphQLClient:
         }
 
         try:
-            response = requests.post(
+            response = self._get_session().post(
                 self._api_endpoint,
                 headers=headers,
                 json=payload,
