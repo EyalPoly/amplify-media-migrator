@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError
@@ -116,6 +116,7 @@ class TestConnect:
             aws_access_key_id="AKID",
             aws_secret_access_key="SECRET",
             aws_session_token="TOKEN",
+            config=ANY,
         )
         assert client._client is mock_s3_client
 
