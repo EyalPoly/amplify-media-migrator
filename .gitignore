@@ -30,6 +30,9 @@ env/
 # Worktrees
 .worktrees/
 
+# Local docs (plans, notes — not for repo)
+docs/
+
 # IDE
 .vscode/
 .idea/
