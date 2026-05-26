@@ -463,3 +463,46 @@ class TestErrorHandling:
             connected_client._handle_http_error(_make_http_error(401))
 
         assert exc_info.value.provider == "google_drive"
+
+
+class TestRateLimiterIntegration:
+    def test_download_file_calls_rate_limiter(
+        self, connected_client: GoogleDriveClient, mock_service: MagicMock
+    ) -> None:
+        mock_limiter = MagicMock(spec=RateLimiter)
+        connected_client._rate_limiter = mock_limiter
+
+        mock_request = MagicMock()
+        mock_service.files.return_value.get_media.return_value = mock_request
+
+        downloader_mock = MagicMock()
+        downloader_mock.next_chunk.return_value = (None, True)
+        with patch(
+            "amplify_media_migrator.sources.google_drive.MediaIoBaseDownload",
+            return_value=downloader_mock,
+        ):
+            connected_client.download_file("file-1")
+
+        mock_limiter.acquire.assert_called_once()
+
+    def test_list_files_calls_rate_limiter_per_page(
+        self, connected_client: GoogleDriveClient, mock_service: MagicMock
+    ) -> None:
+        mock_limiter = MagicMock(spec=RateLimiter)
+        connected_client._rate_limiter = mock_limiter
+
+        mock_service.files.return_value.list.return_value.execute.return_value = {
+            "files": [
+                {
+                    "id": "f1",
+                    "name": "1.jpg",
+                    "mimeType": "image/jpeg",
+                    "size": "100",
+                    "parents": [],
+                }
+            ],
+            "nextPageToken": None,
+        }
+        list(connected_client.list_files("folder-1"))
+
+        mock_limiter.acquire.assert_called_once()
