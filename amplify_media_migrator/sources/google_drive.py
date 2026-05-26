@@ -104,6 +104,7 @@ class GoogleDriveClient:
                 if page_token:
                     request_kwargs["pageToken"] = page_token
 
+                self._rate_limiter.acquire()
                 response = service.files().list(**request_kwargs).execute()
             except HttpError as e:
                 self._handle_http_error(e)
@@ -133,6 +134,7 @@ class GoogleDriveClient:
 
     def download_file(self, file_id: str) -> bytes:
         service = self._ensure_connected()
+        self._rate_limiter.acquire()
         try:
             request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
             buffer = io.BytesIO()
