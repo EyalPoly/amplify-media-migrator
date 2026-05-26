@@ -90,7 +90,8 @@ class GraphQLClient:
             adapter = requests.adapters.HTTPAdapter(pool_connections=1, pool_maxsize=1)
             session.mount("https://", adapter)
             self._local.session = session
-        return self._local.session
+        session: requests.Session = self._local.session
+        return session
 
     def connect(self, id_token: str) -> None:
         self._id_token = id_token
