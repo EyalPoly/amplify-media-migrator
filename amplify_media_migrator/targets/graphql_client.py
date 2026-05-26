@@ -84,12 +84,12 @@ class GraphQLClient:
 
     def _get_session(self) -> requests.Session:
         if not hasattr(self._local, "session"):
-            session = requests.Session()
+            s = requests.Session()
             # Each thread keeps one persistent HTTPS connection to AppSync,
             # eliminating per-request TLS handshake overhead.
             adapter = requests.adapters.HTTPAdapter(pool_connections=1, pool_maxsize=1)
-            session.mount("https://", adapter)
-            self._local.session = session
+            s.mount("https://", adapter)
+            self._local.session = s
         session: requests.Session = self._local.session
         return session
 
