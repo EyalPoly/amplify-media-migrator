@@ -151,11 +151,14 @@ def _create_engine(
     drive_client: GoogleDriveClient,
     id_token: str,
 ) -> MigrationEngine:
+    migration_cfg = cfg.config.migration
+
     storage_client = AmplifyStorageClient(
         bucket=cfg.get("aws.amplify.storage_bucket"),
         region=cfg.get("aws.region"),
         identity_pool_id=cfg.get("aws.cognito.identity_pool_id"),
         user_pool_id=cfg.get("aws.cognito.user_pool_id"),
+        max_pool_connections=migration_cfg.concurrency,
     )
     storage_client.connect(id_token)
 
@@ -164,8 +167,6 @@ def _create_engine(
         region=cfg.get("aws.region"),
     )
     graphql_client.connect(id_token)
-
-    migration_cfg = cfg.config.migration
 
     return MigrationEngine(
         drive_client=drive_client,

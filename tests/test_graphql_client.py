@@ -99,7 +99,7 @@ class TestHandleResponseError:
 
 
 class TestExecute:
-    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    @patch("requests.Session.post")
     def test_sends_correct_request(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:
@@ -117,7 +117,7 @@ class TestExecute:
             timeout=30,
         )
 
-    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    @patch("requests.Session.post")
     def test_returns_data(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:
@@ -129,7 +129,7 @@ class TestExecute:
 
         assert result == {"items": [1, 2, 3]}
 
-    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    @patch("requests.Session.post")
     def test_graphql_errors_raise(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:
@@ -146,7 +146,7 @@ class TestExecute:
         assert exc_info.value.operation == "TestOp"
         assert len(exc_info.value.errors) == 1
 
-    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    @patch("requests.Session.post")
     def test_http_401_raises_auth_error(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:
@@ -155,7 +155,7 @@ class TestExecute:
         with pytest.raises(AuthenticationError):
             connected_client._execute("query { test }")
 
-    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    @patch("requests.Session.post")
     def test_http_500_raises_graphql_error(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:
@@ -166,7 +166,7 @@ class TestExecute:
         with pytest.raises(GraphQLError, match="500"):
             connected_client._execute("query { test }")
 
-    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    @patch("requests.Session.post")
     def test_network_error_raises_graphql_error(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:
@@ -177,7 +177,7 @@ class TestExecute:
         with pytest.raises(GraphQLError, match="request failed"):
             connected_client._execute("query { test }", operation="TestOp")
 
-    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    @patch("requests.Session.post")
     def test_timeout_raises_graphql_error(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:
@@ -192,7 +192,7 @@ class TestExecute:
 
 
 class TestGetObservationBySequentialId:
-    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    @patch("requests.Session.post")
     def test_returns_observation(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:
@@ -210,7 +210,7 @@ class TestGetObservationBySequentialId:
 
         assert result == Observation(id="obs-123", sequential_id=6602)
 
-    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    @patch("requests.Session.post")
     def test_returns_none_when_not_found(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:
@@ -222,7 +222,7 @@ class TestGetObservationBySequentialId:
 
         assert result is None
 
-    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    @patch("requests.Session.post")
     def test_returns_first_when_multiple(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:
@@ -244,7 +244,7 @@ class TestGetObservationBySequentialId:
         assert result is not None
         assert result.id == "obs-1"
 
-    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    @patch("requests.Session.post")
     def test_paginates_to_find_observation(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:
@@ -278,7 +278,7 @@ class TestGetObservationBySequentialId:
         second_call_variables = mock_post.call_args_list[1][1]["json"]["variables"]
         assert second_call_variables["nextToken"] == "token-page-2"
 
-    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    @patch("requests.Session.post")
     def test_returns_none_after_all_pages_exhausted(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:
@@ -312,7 +312,7 @@ class TestGetObservationBySequentialId:
 
 
 class TestGetObservationsBySequentialIds:
-    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    @patch("requests.Session.post")
     def test_returns_found_observations(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:
@@ -331,7 +331,7 @@ class TestGetObservationsBySequentialIds:
         assert 6000 in result
         assert result[6000].id == "obs-1"
 
-    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    @patch("requests.Session.post")
     def test_skips_not_found(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:
@@ -354,7 +354,7 @@ class TestGetObservationsBySequentialIds:
         assert 6000 in result
         assert 6001 not in result
 
-    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    @patch("requests.Session.post")
     def test_empty_list(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:
@@ -365,7 +365,7 @@ class TestGetObservationsBySequentialIds:
 
 
 class TestCreateMedia:
-    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    @patch("requests.Session.post")
     def test_creates_image_media(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:
@@ -397,7 +397,7 @@ class TestCreateMedia:
             is_available_for_public_use=False,
         )
 
-    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    @patch("requests.Session.post")
     def test_creates_video_media(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:
@@ -425,7 +425,7 @@ class TestCreateMedia:
         assert result.type == MediaType.VIDEO
         assert result.is_available_for_public_use is True
 
-    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    @patch("requests.Session.post")
     def test_sends_correct_variables(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:
@@ -462,7 +462,7 @@ class TestCreateMedia:
 
 
 class TestGetMediaByUrl:
-    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    @patch("requests.Session.post")
     def test_returns_media(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:
@@ -492,7 +492,7 @@ class TestGetMediaByUrl:
         assert result.id == "media-1"
         assert result.type == MediaType.IMAGE
 
-    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    @patch("requests.Session.post")
     def test_returns_none_when_not_found(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:
@@ -506,7 +506,7 @@ class TestGetMediaByUrl:
 
         assert result is None
 
-    @patch("amplify_media_migrator.targets.graphql_client.requests.post")
+    @patch("requests.Session.post")
     def test_paginates_to_find_media(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:

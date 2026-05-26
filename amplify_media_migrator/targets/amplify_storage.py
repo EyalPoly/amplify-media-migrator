@@ -4,6 +4,7 @@ from typing import Any, Callable, NoReturn, Optional
 
 import boto3
 from boto3.s3.transfer import TransferConfig
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from ..utils.exceptions import AuthenticationError, UploadError
@@ -18,11 +19,13 @@ class AmplifyStorageClient:
         region: str = "us-east-1",
         identity_pool_id: str = "",
         user_pool_id: str = "",
+        max_pool_connections: int = 100,
     ) -> None:
         self._bucket = bucket
         self._region = region
         self._identity_pool_id = identity_pool_id
         self._user_pool_id = user_pool_id
+        self._max_pool_connections = max_pool_connections
         self._client: Optional[Any] = None
 
     def connect(self, id_token: str) -> None:
@@ -52,6 +55,7 @@ class AmplifyStorageClient:
                 aws_access_key_id=creds["AccessKeyId"],
                 aws_secret_access_key=creds["SecretKey"],
                 aws_session_token=creds["SessionToken"],
+                config=Config(max_pool_connections=self._max_pool_connections),
             )
             logger.info("Connected to S3 via Cognito Identity Pool")
 
