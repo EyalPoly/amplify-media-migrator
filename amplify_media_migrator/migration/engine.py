@@ -2,6 +2,7 @@ import asyncio
 import concurrent.futures
 import logging
 import random
+import threading
 from typing import Callable, Dict, List, Optional
 
 from ..sources.google_drive import DriveFile, GoogleDriveClient
@@ -18,8 +19,6 @@ from .mapper import FilenameMapper, FilenamePattern, ParsedFilename
 from .progress import FileStatus, ProgressTracker
 
 logger = logging.getLogger(__name__)
-
-SAVE_INTERVAL = 50
 
 
 class MigrationEngine:
@@ -45,8 +44,6 @@ class MigrationEngine:
         self._retry_delay_seconds = retry_delay_seconds
         self._default_media_public = default_media_public
         self._semaphore: Optional[asyncio.Semaphore] = None
-        self._save_lock: Optional[asyncio.Lock] = None
-        self._processed_count = 0
         self._on_progress: Optional[Callable[[str, FileStatus], None]] = None
         self._on_total_known: Optional[Callable[[int], None]] = None
         self._on_file_started: Optional[Callable[[str], None]] = None
@@ -67,15 +64,18 @@ class MigrationEngine:
             self._semaphore = asyncio.Semaphore(self._concurrency)
         return self._semaphore
 
-    def _get_save_lock(self) -> asyncio.Lock:
-        if self._save_lock is None:
-            self._save_lock = asyncio.Lock()
-        return self._save_lock
-
     def _reset_run_state(self) -> None:
-        self._processed_count = 0
         self._semaphore = None
-        self._save_lock = None
+
+    def _start_autosave(self, interval: float = 30.0) -> threading.Event:
+        stop = threading.Event()
+
+        def _loop() -> None:
+            while not stop.wait(interval):
+                self._progress.save()
+
+        threading.Thread(target=_loop, daemon=True, name="autosave").start()
+        return stop
 
     async def scan(self, folder_id: str) -> Dict[str, int]:
         self._progress.load(folder_id)
@@ -159,12 +159,14 @@ class MigrationEngine:
         pending_ids = set(self._progress.get_pending_file_ids())
         files_to_process = [f for f in files if f.id in pending_ids]
 
-        self._processed_count = 0
-        tasks = [self._process_with_semaphore(f, dry_run) for f in files_to_process]
-        await asyncio.gather(*tasks)
-
-        if not dry_run:
-            self._progress.save()
+        _autosave_stop = self._start_autosave() if not dry_run else None
+        try:
+            tasks = [self._process_with_semaphore(f, dry_run) for f in files_to_process]
+            await asyncio.gather(*tasks)
+        finally:
+            if _autosave_stop is not None:
+                _autosave_stop.set()
+                self._progress.save()
 
     async def resume(
         self,
@@ -236,11 +238,14 @@ class MigrationEngine:
             self._on_total_known(len(files_to_process))
 
         logger.info("Starting processing of %d files...", len(files_to_process))
-        self._processed_count = 0
-        tasks = [self._process_with_semaphore(f, dry_run) for f in files_to_process]
-        await asyncio.gather(*tasks)
-
-        self._progress.save()
+        _autosave_stop = self._start_autosave() if not dry_run else None
+        try:
+            tasks = [self._process_with_semaphore(f, dry_run) for f in files_to_process]
+            await asyncio.gather(*tasks)
+        finally:
+            if _autosave_stop is not None:
+                _autosave_stop.set()
+                self._progress.save()
 
     async def _fetch_and_evaluate_needs_review(
         self, file_id: str
@@ -271,11 +276,6 @@ class MigrationEngine:
     ) -> None:
         async with self._get_semaphore():
             await self.process_file(file, dry_run)
-            if not dry_run:
-                async with self._get_save_lock():
-                    self._processed_count += 1
-                    if self._processed_count % SAVE_INTERVAL == 0:
-                        self._progress.save()
 
     async def process_file(
         self,

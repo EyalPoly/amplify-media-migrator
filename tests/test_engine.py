@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from amplify_media_migrator.migration.engine import MigrationEngine, SAVE_INTERVAL
+from amplify_media_migrator.migration.engine import MigrationEngine
 from amplify_media_migrator.migration.mapper import (
     FilenameMapper,
     FilenamePattern,
@@ -1477,49 +1477,111 @@ class TestErrorClearing:
         assert fp.error is None
 
 
-class TestSaveInterval:
-    def test_periodic_save_triggered(
+class TestAutosave:
+    def test_save_called_in_finally_on_completion(
         self,
+        engine: MigrationEngine,
         drive_client: MagicMock,
         storage_client: MagicMock,
         graphql_client: MagicMock,
         progress: ProgressTracker,
-        mapper: FilenameMapper,
     ) -> None:
-        engine = MigrationEngine(
-            drive_client=drive_client,
-            storage_client=storage_client,
-            graphql_client=graphql_client,
-            progress_tracker=progress,
-            mapper=mapper,
-            concurrency=SAVE_INTERVAL,
-            retry_attempts=1,
-            retry_delay_seconds=0,
-        )
-
-        num_files = SAVE_INTERVAL
-        files = [_drive_file(f"f{i}", f"{6600 + i}.jpg") for i in range(num_files)]
-        drive_client.list_files.return_value = files
-
-        def mock_get_obs(seq_ids: list) -> dict:
-            return {sid: _observation(f"obs-{sid}", sid) for sid in seq_ids}
-
-        graphql_client.get_observations_by_sequential_ids.side_effect = mock_get_obs
+        drive_client.list_files.return_value = [_drive_file("f1", "6602.jpg")]
+        graphql_client.get_observations_by_sequential_ids.return_value = {
+            6602: _observation("obs-1", 6602)
+        }
+        graphql_client.get_media_by_url.return_value = None
         drive_client.download_file.return_value = b"data"
-        storage_client.upload_file.side_effect = [
-            f"https://bucket/media/obs-{6600 + i}/{6600 + i}.jpg"
-            for i in range(num_files)
-        ]
-        graphql_client.create_media.side_effect = [
-            _media(f"m-{i}") for i in range(num_files)
-        ]
+        storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
+        graphql_client.create_media.return_value = _media("m-1")
 
         with patch.object(progress, "save", wraps=progress.save) as save_spy:
             asyncio.run(engine.migrate("folder-1"))
 
-            # save called: once after registering files, once for periodic
-            # (at SAVE_INTERVAL), and once at end
-            assert save_spy.call_count >= 3
+        # once after scan, once in finally
+        assert save_spy.call_count >= 2
+
+    def test_save_called_in_finally_on_keyboard_interrupt(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        drive_client.list_files.return_value = [_drive_file("f1", "6602.jpg")]
+
+        # Raise KeyboardInterrupt from within the event loop (not a thread) so
+        # it propagates cleanly through asyncio.gather and hits the finally block.
+        async def _raise_ki(*args, **kwargs):  # type: ignore[no-untyped-def]
+            raise KeyboardInterrupt()
+
+        with patch.object(progress, "save", wraps=progress.save) as save_spy:
+            with patch.object(engine, "process_file", side_effect=_raise_ki):
+                with pytest.raises(KeyboardInterrupt):
+                    asyncio.run(engine.migrate("folder-1"))
+
+        assert save_spy.called
+
+    def test_autosave_thread_fires_after_interval(
+        self,
+        engine: MigrationEngine,
+    ) -> None:
+        fired: list = []
+
+        real_save = engine._progress.save
+
+        def capturing_save() -> None:
+            fired.append(1)
+            real_save()
+
+        engine._progress.save = capturing_save  # type: ignore[method-assign]
+
+        # Run with a very short interval so it fires before the gather completes
+        with patch.object(
+            engine, "_start_autosave", wraps=engine._start_autosave
+        ) as spy:
+            stop = engine._start_autosave(interval=0.05)
+            import time
+
+            time.sleep(0.15)
+            stop.set()
+
+        assert len(fired) >= 1, "autosave thread should have fired at least once"
+
+    def test_autosave_not_started_for_dry_run(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        drive_client.list_files.return_value = [_drive_file("f1", "6602.jpg")]
+        graphql_client.get_observations_by_sequential_ids.return_value = {
+            6602: _observation("obs-1", 6602)
+        }
+        graphql_client.get_media_by_url.return_value = None
+
+        with patch.object(engine, "_start_autosave") as mock_autosave:
+            asyncio.run(engine.migrate("folder-1", dry_run=True))
+
+        mock_autosave.assert_not_called()
+
+    def test_no_save_in_dry_run(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        drive_client.list_files.return_value = [_drive_file("f1", "6602.jpg")]
+        graphql_client.get_observations_by_sequential_ids.return_value = {
+            6602: _observation("obs-1", 6602)
+        }
+        graphql_client.get_media_by_url.return_value = None
+
+        with patch.object(progress, "save") as save_mock:
+            asyncio.run(engine.migrate("folder-1", dry_run=True))
+
+        save_mock.assert_not_called()
 
 
 class TestGetSummary:
