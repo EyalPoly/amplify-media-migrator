@@ -1,5 +1,5 @@
 import queue
-from typing import Optional
+from typing import Optional, cast
 
 _SENTINEL = object()
 
@@ -49,7 +49,7 @@ class _QueueStream:
             if self._error:
                 raise self._error
             return False
-        self._leftover = bytes(item)  # type: ignore[arg-type]
+        self._leftover = cast(bytes, item)
         return True
 
     def _read_up_to(self, size: int) -> bytes:

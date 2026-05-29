@@ -34,6 +34,7 @@ class MigrationEngine:
         retry_attempts: int = 3,
         retry_delay_seconds: int = 5,
         default_media_public: bool = False,
+        large_file_threshold_mb: int = 25,
         token_manager: Optional[CognitoTokenManager] = None,
         initial_id_token: Optional[str] = None,
     ) -> None:
@@ -46,6 +47,7 @@ class MigrationEngine:
         self._retry_attempts = retry_attempts
         self._retry_delay_seconds = retry_delay_seconds
         self._default_media_public = default_media_public
+        self._large_file_threshold_bytes: int = large_file_threshold_mb * 1024 * 1024
         self._token_manager = token_manager
         self._initial_id_token = initial_id_token
         self._semaphore: Optional[asyncio.Semaphore] = None
@@ -367,6 +369,17 @@ class MigrationEngine:
         stored = self._progress.get_file(file.id)
         if stored and stored.status == FileStatus.UPLOADED and stored.s3_url:
             s3_url = stored.s3_url
+        elif file.size > 0 and file.size > self._large_file_threshold_bytes:
+            content_type = get_content_type(parsed.extension)
+            try:
+                s3_url = await self._stream_upload_with_retry(
+                    file, s3_key, content_type
+                )
+            except AuthenticationError:
+                raise
+            except MigratorError as e:
+                self._mark_failed(file, parsed, f"Stream upload failed: {e}")
+                return
         else:
             try:
                 data = await self._download_with_retry(file.id)
@@ -490,6 +503,51 @@ class MigrationEngine:
         raise last_error or DownloadError(
             f"Download failed after {self._retry_attempts} attempts",
             file_id=file_id,
+        )
+
+    async def _stream_upload_with_retry(
+        self, file: DriveFile, s3_key: str, content_type: str
+    ) -> str:
+        last_error: Optional[MigratorError] = None
+        for attempt in range(self._retry_attempts):
+            stream = self._drive_client.open_download_stream(file.id)
+            try:
+                s3_url: str = await asyncio.to_thread(
+                    self._storage_client.upload_file_stream,
+                    stream,
+                    s3_key,
+                    content_type,
+                )
+                return s3_url
+            except AuthenticationError:
+                raise
+            except RateLimitError as e:
+                last_error = e
+                delay = e.retry_after or self._retry_delay_seconds * (2**attempt)
+                delay += random.uniform(0, 1)
+                logger.warning(
+                    "Rate limit streaming %s (attempt %d/%d), retrying in %.1fs",
+                    file.id,
+                    attempt + 1,
+                    self._retry_attempts,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+            except MigratorError as e:
+                last_error = e
+                delay = self._retry_delay_seconds * (2**attempt) + random.uniform(0, 1)
+                logger.warning(
+                    "Error streaming %s (attempt %d/%d): %s, retrying in %.1fs",
+                    file.id,
+                    attempt + 1,
+                    self._retry_attempts,
+                    e,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+        raise last_error or DownloadError(
+            f"Stream upload failed after {self._retry_attempts} attempts",
+            file_id=file.id,
         )
 
     def _mark_failed(self, file: DriveFile, parsed: ParsedFilename, error: str) -> None:
