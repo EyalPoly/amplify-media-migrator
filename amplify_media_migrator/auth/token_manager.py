@@ -41,6 +41,9 @@ class CognitoTokenManager:
         self._stop_event = threading.Event()
 
     def start(self, current_token: str) -> None:
+        # Guard against double-start: if a refresh thread is already running, do nothing.
+        if self._thread and self._thread.is_alive():
+            return
         self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._run,
@@ -56,14 +59,28 @@ class CognitoTokenManager:
             self._thread.join(timeout=5)
 
     def _run(self, current_token: str) -> None:
+        warned_decode_failure = False
         while not self._stop_event.is_set():
             expiry = _decode_jwt_expiry(current_token)
-            if expiry is not None:
-                seconds_left = expiry - time.time()
-                if seconds_left < REFRESH_BEFORE_EXPIRY_SECONDS:
-                    new_token = self._refresh_fn()
-                    if new_token:
-                        current_token = new_token
+            if expiry is None:
+                if not warned_decode_failure:
+                    logger.warning(
+                        "Could not decode token expiry; proactive refresh is disabled"
+                    )
+                    warned_decode_failure = True
+            elif expiry - time.time() < REFRESH_BEFORE_EXPIRY_SECONDS:
+                new_token = self._refresh_fn()
+                if new_token:
+                    current_token = new_token
+                    try:
                         self._on_token(new_token)
                         logger.info("Cognito token refreshed proactively")
+                    except Exception:
+                        logger.exception(
+                            "Token distribution callback failed; will retry next interval"
+                        )
+                else:
+                    logger.warning(
+                        "Token refresh returned no token; will retry next interval"
+                    )
             self._stop_event.wait(self._check_interval)

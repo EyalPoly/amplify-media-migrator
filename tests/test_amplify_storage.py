@@ -152,8 +152,10 @@ class TestHandleClientError:
                 _make_client_error("AccessDenied")
             )
 
-    def test_expired_token_raises_auth_error(self) -> None:
-        with pytest.raises(AuthenticationError, match="ExpiredToken"):
+    def test_expired_token_raises_upload_error(self) -> None:
+        # ExpiredToken is transient (credential rotation window) — treat as
+        # retryable UploadError rather than fatal AuthenticationError.
+        with pytest.raises(UploadError, match="ExpiredToken"):
             AmplifyStorageClient._handle_client_error(
                 _make_client_error("ExpiredToken")
             )

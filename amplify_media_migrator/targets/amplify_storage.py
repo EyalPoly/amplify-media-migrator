@@ -81,7 +81,7 @@ class AmplifyStorageClient:
     ) -> NoReturn:
         code = error.response["Error"]["Code"]
 
-        if code in ("AccessDenied", "InvalidAccessKeyId", "ExpiredToken"):
+        if code in ("AccessDenied", "InvalidAccessKeyId"):
             raise AuthenticationError(
                 f"S3 authentication error ({code}): {error}",
                 provider="cognito",

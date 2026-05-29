@@ -340,6 +340,54 @@ class TestCreateEngine:
             mock_storage.connect.assert_called_once_with("token")
             mock_gql.connect.assert_called_once_with("token")
 
+    def test_creates_token_manager_with_real_refresh(self) -> None:
+        mock_cfg = MagicMock()
+        mock_cfg.get.side_effect = lambda key: {
+            "aws.amplify.storage_bucket": "test-bucket",
+            "aws.region": "us-east-1",
+            "aws.cognito.identity_pool_id": "pool-id",
+            "aws.cognito.user_pool_id": "user-pool",
+            "aws.amplify.api_endpoint": "https://test.api.com/graphql",
+        }[key]
+        mock_cfg.config = Config(migration=MigrationConfig(concurrency=5))
+
+        mock_cognito_provider = MagicMock()
+        mock_cognito_client = MagicMock()
+        mock_cognito_client.id_token = "new-token"
+        mock_cognito_provider.cognito_client = mock_cognito_client
+
+        with patch("amplify_media_migrator.cli.AmplifyStorageClient"), patch(
+            "amplify_media_migrator.cli.GraphQLClient"
+        ):
+            engine = _create_engine(
+                mock_cfg, MagicMock(), "token", mock_cognito_provider
+            )
+
+        assert engine._token_manager is not None
+
+        # refresh_fn must call renew_access_token(), not just get_id_token()
+        result = engine._token_manager._refresh_fn()
+        mock_cognito_client.renew_access_token.assert_called_once()
+        assert result == "new-token"
+
+    def test_no_token_manager_without_cognito_provider(self) -> None:
+        mock_cfg = MagicMock()
+        mock_cfg.get.side_effect = lambda key: {
+            "aws.amplify.storage_bucket": "test-bucket",
+            "aws.region": "us-east-1",
+            "aws.cognito.identity_pool_id": "pool-id",
+            "aws.cognito.user_pool_id": "user-pool",
+            "aws.amplify.api_endpoint": "https://test.api.com/graphql",
+        }[key]
+        mock_cfg.config = Config(migration=MigrationConfig(concurrency=5))
+
+        with patch("amplify_media_migrator.cli.AmplifyStorageClient"), patch(
+            "amplify_media_migrator.cli.GraphQLClient"
+        ):
+            engine = _create_engine(mock_cfg, MagicMock(), "token")
+
+        assert engine._token_manager is None
+
 
 class TestRunWithProgress:
     def test_runs_coroutine_without_tqdm(self) -> None:

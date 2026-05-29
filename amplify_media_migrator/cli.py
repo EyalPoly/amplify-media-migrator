@@ -173,12 +173,31 @@ def _create_engine(
     token_manager: Optional[CognitoTokenManager] = None
     if cognito_provider is not None:
 
+        def _refresh_cognito_token() -> Optional[str]:
+            # renew_access_token() calls REFRESH_TOKEN_AUTH and updates
+            # cognito_client.id_token in place; get_id_token() alone is a
+            # cache read and never contacts AWS.
+            try:
+                if cognito_provider.cognito_client is None:
+                    logger.warning(
+                        "Cognito client not initialised; cannot refresh token"
+                    )
+                    return None
+                cognito_provider.cognito_client.renew_access_token()
+                new_token: Optional[str] = cognito_provider.cognito_client.id_token
+                if new_token:
+                    cognito_provider._id_token = new_token
+                return new_token
+            except Exception:
+                logger.exception("Cognito token renewal failed")
+                return None
+
         def _on_new_token(t: str) -> None:
             graphql_client.connect(t)
             storage_client.connect(t)
 
         token_manager = CognitoTokenManager(
-            refresh_fn=cognito_provider.get_id_token,
+            refresh_fn=_refresh_cognito_token,
             on_token=_on_new_token,
         )
 

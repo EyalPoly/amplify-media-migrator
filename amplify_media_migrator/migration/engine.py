@@ -164,7 +164,7 @@ class MigrationEngine:
         pending_ids = set(self._progress.get_pending_file_ids())
         files_to_process = [f for f in files if f.id in pending_ids]
 
-        if self._token_manager and self._initial_id_token:
+        if not dry_run and self._token_manager and self._initial_id_token:
             self._token_manager.start(self._initial_id_token)
         _autosave_stop = self._start_autosave() if not dry_run else None
         try:
@@ -247,7 +247,7 @@ class MigrationEngine:
             self._on_total_known(len(files_to_process))
 
         logger.info("Starting processing of %d files...", len(files_to_process))
-        if self._token_manager and self._initial_id_token:
+        if not dry_run and self._token_manager and self._initial_id_token:
             self._token_manager.start(self._initial_id_token)
         _autosave_stop = self._start_autosave() if not dry_run else None
         try:
