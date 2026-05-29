@@ -3,7 +3,7 @@ import logging
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterator, NoReturn, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterator, NoReturn, Optional
 
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -15,6 +15,9 @@ from amplify_media_migrator.utils.exceptions import (
     RateLimitError,
 )
 from amplify_media_migrator.utils.rate_limiter import RateLimiter
+
+if TYPE_CHECKING:
+    from amplify_media_migrator.utils.stream import _QueueStream
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +160,44 @@ class GoogleDriveClient:
         data = self.download_file(file_id)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(data)
+
+    def open_download_stream(
+        self, file_id: str, chunk_size: int = 8 * 1024 * 1024
+    ) -> "_QueueStream":
+        """Start a background download; return a stream readable by s3.upload_fileobj."""
+        from amplify_media_migrator.utils.stream import _QueueStream
+
+        stream = _QueueStream()
+
+        def _download() -> None:
+            try:
+                service = self._ensure_connected()
+                self._rate_limiter.acquire()
+                request = service.files().get_media(
+                    fileId=file_id, supportsAllDrives=True
+                )
+                downloader = MediaIoBaseDownload(stream, request, chunksize=chunk_size)
+                done = False
+                while not done:
+                    _, done = downloader.next_chunk()
+                stream.close_write()
+            except HttpError as e:
+                try:
+                    self._handle_http_error(e, file_id=file_id)
+                except Exception as exc:
+                    stream.close_write(exc)
+            except Exception as e:
+                stream.close_write(
+                    DownloadError(
+                        f"Network error downloading {file_id}: {e}",
+                        file_id=file_id,
+                    )
+                )
+
+        threading.Thread(
+            target=_download, daemon=True, name=f"drive-dl-{file_id}"
+        ).start()
+        return stream
 
     def get_file_metadata(self, file_id: str) -> DriveFile:
         service = self._ensure_connected()
