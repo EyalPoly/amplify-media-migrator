@@ -5,11 +5,12 @@ import threading
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import click
 
 from .auth.google_drive import GoogleDriveAuthProvider
+from .auth.token_manager import CognitoTokenManager
 from .config import ConfigManager, ConfigurationError, config_to_dict
 from .migration.engine import MigrationEngine
 from .migration.mapper import FilenameMapper
@@ -121,7 +122,7 @@ def _authenticate_google(cfg: ConfigManager) -> GoogleDriveClient:
     return drive_client
 
 
-def _authenticate_cognito(cfg: ConfigManager) -> str:
+def _authenticate_cognito(cfg: ConfigManager) -> tuple[str, Any]:
     from amplify_auth import CognitoAuthProvider
 
     cognito = CognitoAuthProvider(
@@ -143,13 +144,14 @@ def _authenticate_cognito(cfg: ConfigManager) -> str:
         click.echo("Failed to obtain ID token.", err=True)
         raise SystemExit(1)
 
-    return id_token
+    return id_token, cognito
 
 
 def _create_engine(
     cfg: ConfigManager,
     drive_client: GoogleDriveClient,
     id_token: str,
+    cognito_provider: Any = None,
 ) -> MigrationEngine:
     migration_cfg = cfg.config.migration
 
@@ -168,6 +170,37 @@ def _create_engine(
     )
     graphql_client.connect(id_token)
 
+    token_manager: Optional[CognitoTokenManager] = None
+    if cognito_provider is not None:
+
+        def _refresh_cognito_token() -> Optional[str]:
+            # renew_access_token() calls REFRESH_TOKEN_AUTH and updates
+            # cognito_client.id_token in place; get_id_token() alone is a
+            # cache read and never contacts AWS.
+            try:
+                if cognito_provider.cognito_client is None:
+                    logger.warning(
+                        "Cognito client not initialised; cannot refresh token"
+                    )
+                    return None
+                cognito_provider.cognito_client.renew_access_token()
+                new_token: Optional[str] = cognito_provider.cognito_client.id_token
+                if new_token:
+                    cognito_provider._id_token = new_token
+                return new_token
+            except Exception:
+                logger.exception("Cognito token renewal failed")
+                return None
+
+        def _on_new_token(t: str) -> None:
+            graphql_client.connect(t)
+            storage_client.connect(t)
+
+        token_manager = CognitoTokenManager(
+            refresh_fn=_refresh_cognito_token,
+            on_token=_on_new_token,
+        )
+
     return MigrationEngine(
         drive_client=drive_client,
         storage_client=storage_client,
@@ -178,6 +211,8 @@ def _create_engine(
         retry_attempts=migration_cfg.retry_attempts,
         retry_delay_seconds=migration_cfg.retry_delay_seconds,
         default_media_public=migration_cfg.default_media_public,
+        token_manager=token_manager,
+        initial_id_token=id_token,
     )
 
 
@@ -324,8 +359,8 @@ def migrate(
 
     cfg = _load_config()
     drive_client = _authenticate_google(cfg)
-    id_token = _authenticate_cognito(cfg)
-    engine = _create_engine(cfg, drive_client, id_token)
+    id_token, cognito_provider = _authenticate_cognito(cfg)
+    engine = _create_engine(cfg, drive_client, id_token, cognito_provider)
 
     if dry_run:
         click.echo("\n[DRY RUN] No files will be downloaded or uploaded.\n")
@@ -364,8 +399,8 @@ def resume(
 
     cfg = _load_config()
     drive_client = _authenticate_google(cfg)
-    id_token = _authenticate_cognito(cfg)
-    engine = _create_engine(cfg, drive_client, id_token)
+    id_token, cognito_provider = _authenticate_cognito(cfg)
+    engine = _create_engine(cfg, drive_client, id_token, cognito_provider)
 
     _peek = ProgressTracker()
     if _peek.load(folder_id):
@@ -477,7 +512,7 @@ def validate(folder_id: str) -> None:
     # 4. Cognito authentication
     cognito_ok = False
     try:
-        id_token = _authenticate_cognito(cfg)
+        id_token, _ = _authenticate_cognito(cfg)
         click.echo("[PASS] Cognito authentication")
         cognito_ok = True
     except SystemExit:

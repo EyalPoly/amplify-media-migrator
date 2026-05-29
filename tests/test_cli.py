@@ -276,8 +276,9 @@ class TestAuthenticateCognito:
         mock_cognito.get_id_token.return_value = "test-token"
         mock_cognito_cls.return_value = mock_cognito
 
-        result = _authenticate_cognito(mock_cfg)
-        assert result == "test-token"
+        id_token, cognito = _authenticate_cognito(mock_cfg)
+        assert id_token == "test-token"
+        assert cognito is mock_cognito
 
     @patch("amplify_media_migrator.cli.click.prompt", return_value="password")
     @patch("amplify_auth.CognitoAuthProvider")
@@ -338,6 +339,54 @@ class TestCreateEngine:
             assert isinstance(engine, MigrationEngine)
             mock_storage.connect.assert_called_once_with("token")
             mock_gql.connect.assert_called_once_with("token")
+
+    def test_creates_token_manager_with_real_refresh(self) -> None:
+        mock_cfg = MagicMock()
+        mock_cfg.get.side_effect = lambda key: {
+            "aws.amplify.storage_bucket": "test-bucket",
+            "aws.region": "us-east-1",
+            "aws.cognito.identity_pool_id": "pool-id",
+            "aws.cognito.user_pool_id": "user-pool",
+            "aws.amplify.api_endpoint": "https://test.api.com/graphql",
+        }[key]
+        mock_cfg.config = Config(migration=MigrationConfig(concurrency=5))
+
+        mock_cognito_provider = MagicMock()
+        mock_cognito_client = MagicMock()
+        mock_cognito_client.id_token = "new-token"
+        mock_cognito_provider.cognito_client = mock_cognito_client
+
+        with patch("amplify_media_migrator.cli.AmplifyStorageClient"), patch(
+            "amplify_media_migrator.cli.GraphQLClient"
+        ):
+            engine = _create_engine(
+                mock_cfg, MagicMock(), "token", mock_cognito_provider
+            )
+
+        assert engine._token_manager is not None
+
+        # refresh_fn must call renew_access_token(), not just get_id_token()
+        result = engine._token_manager._refresh_fn()
+        mock_cognito_client.renew_access_token.assert_called_once()
+        assert result == "new-token"
+
+    def test_no_token_manager_without_cognito_provider(self) -> None:
+        mock_cfg = MagicMock()
+        mock_cfg.get.side_effect = lambda key: {
+            "aws.amplify.storage_bucket": "test-bucket",
+            "aws.region": "us-east-1",
+            "aws.cognito.identity_pool_id": "pool-id",
+            "aws.cognito.user_pool_id": "user-pool",
+            "aws.amplify.api_endpoint": "https://test.api.com/graphql",
+        }[key]
+        mock_cfg.config = Config(migration=MigrationConfig(concurrency=5))
+
+        with patch("amplify_media_migrator.cli.AmplifyStorageClient"), patch(
+            "amplify_media_migrator.cli.GraphQLClient"
+        ):
+            engine = _create_engine(mock_cfg, MagicMock(), "token")
+
+        assert engine._token_manager is None
 
 
 class TestRunWithProgress:
@@ -652,6 +701,7 @@ class TestMigrateCommand:
         mock_run_progress: MagicMock,
         runner: CliRunner,
     ) -> None:
+        mock_auth_c.return_value = ("test-token", MagicMock())
         mock_engine = MagicMock()
         mock_engine.get_summary.return_value = {
             "total": 10,
@@ -683,6 +733,7 @@ class TestMigrateCommand:
         mock_run_progress: MagicMock,
         runner: CliRunner,
     ) -> None:
+        mock_auth_c.return_value = ("test-token", MagicMock())
         mock_engine = MagicMock()
         mock_engine.get_summary.return_value = {
             "total": 0,
@@ -715,6 +766,7 @@ class TestResumeCommand:
         mock_run_progress: MagicMock,
         runner: CliRunner,
     ) -> None:
+        mock_auth_c.return_value = ("test-token", MagicMock())
         mock_engine = MagicMock()
         mock_engine.get_summary.return_value = {
             "total": 10,
@@ -748,6 +800,7 @@ class TestResumeCommand:
         mock_run_progress: MagicMock,
         runner: CliRunner,
     ) -> None:
+        mock_auth_c.return_value = ("test-token", MagicMock())
         mock_engine = MagicMock()
         mock_engine.get_summary.return_value = {
             "total": 0,
@@ -778,6 +831,7 @@ class TestResumeCommand:
         mock_run_progress: MagicMock,
         runner: CliRunner,
     ) -> None:
+        mock_auth_c.return_value = ("test-token", MagicMock())
         mock_engine = MagicMock()
         mock_engine.get_summary.return_value = {
             "total": 5,
@@ -814,6 +868,7 @@ class TestMigrateVerbose:
         mock_run_progress: MagicMock,
         runner: CliRunner,
     ) -> None:
+        mock_auth_c.return_value = ("test-token", MagicMock())
         mock_engine = MagicMock()
         mock_engine.get_summary.return_value = {
             "total": 0,
@@ -852,7 +907,7 @@ class TestValidateCommand:
         mock_drive = MagicMock()
         mock_drive.list_files.return_value = iter([])
         mock_auth_g.return_value = mock_drive
-        mock_auth_c.return_value = "test-token"
+        mock_auth_c.return_value = ("test-token", MagicMock())
         mock_storage = MagicMock()
         mock_storage.file_exists.return_value = False
         mock_storage_cls.return_value = mock_storage
@@ -896,7 +951,7 @@ class TestValidateCommand:
         mock_cfg.get.side_effect = lambda key: "test-value"
         mock_load.return_value = mock_cfg
         mock_auth_g.side_effect = SystemExit(1)
-        mock_auth_c.return_value = "test-token"
+        mock_auth_c.return_value = ("test-token", MagicMock())
 
         with patch("amplify_media_migrator.cli.AmplifyStorageClient") as mock_s, patch(
             "amplify_media_migrator.cli.GraphQLClient"
