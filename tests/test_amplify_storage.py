@@ -9,6 +9,7 @@ from amplify_media_migrator.utils.exceptions import (
     AuthenticationError,
     UploadError,
 )
+from amplify_media_migrator.utils.stream import _QueueStream
 
 pytestmark = pytest.mark.unit
 
@@ -371,3 +372,46 @@ class TestDeleteFile:
     def test_not_connected_raises(self, client: AmplifyStorageClient) -> None:
         with pytest.raises(UploadError, match="Not connected"):
             client.delete_file("test.jpg")
+
+
+class TestUploadFileStream:
+    def test_calls_upload_fileobj(
+        self, connected_client: AmplifyStorageClient, mock_s3: MagicMock
+    ) -> None:
+        s = _QueueStream()
+        s.write(b"file_bytes")
+        s.close_write()
+
+        url = connected_client.upload_file_stream(s, "media/obs/file.jpg", "image/jpeg")
+
+        mock_s3.upload_fileobj.assert_called_once()
+        call_args = mock_s3.upload_fileobj.call_args
+        assert call_args[0][0] is s
+        assert call_args[0][1] == BUCKET
+        assert call_args[0][2] == "media/obs/file.jpg"
+        assert call_args[1]["ExtraArgs"] == {"ContentType": "image/jpeg"}
+        assert url == f"https://{BUCKET}.s3.{REGION}.amazonaws.com/media/obs/file.jpg"
+
+    def test_s3_error_raises_upload_error(
+        self, connected_client: AmplifyStorageClient, mock_s3: MagicMock
+    ) -> None:
+        mock_s3.upload_fileobj.side_effect = _make_client_error("InternalError")
+        s = _QueueStream()
+        s.close_write()
+        with pytest.raises(UploadError):
+            connected_client.upload_file_stream(s, "media/obs/file.jpg", "image/jpeg")
+
+    def test_auth_error_raises_authentication_error(
+        self, connected_client: AmplifyStorageClient, mock_s3: MagicMock
+    ) -> None:
+        mock_s3.upload_fileobj.side_effect = _make_client_error("AccessDenied")
+        s = _QueueStream()
+        s.close_write()
+        with pytest.raises(AuthenticationError):
+            connected_client.upload_file_stream(s, "media/obs/file.jpg", "image/jpeg")
+
+    def test_not_connected_raises(self, client: AmplifyStorageClient) -> None:
+        s = _QueueStream()
+        s.close_write()
+        with pytest.raises(UploadError, match="Not connected"):
+            client.upload_file_stream(s, "media/obs/file.jpg", "image/jpeg")

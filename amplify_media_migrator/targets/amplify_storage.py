@@ -114,6 +114,33 @@ class AmplifyStorageClient:
         logger.debug("Uploaded %s to %s", key, url)
         return url
 
+    def upload_file_stream(
+        self,
+        stream: Any,
+        key: str,
+        content_type: str,
+        chunk_size_mb: int = 8,
+    ) -> str:
+        s3 = self._ensure_connected()
+        config = TransferConfig(
+            multipart_threshold=chunk_size_mb * 1024 * 1024,
+            multipart_chunksize=chunk_size_mb * 1024 * 1024,
+        )
+        try:
+            s3.upload_fileobj(
+                stream,
+                self._bucket,
+                key,
+                ExtraArgs={"ContentType": content_type},
+                Config=config,
+            )
+        except ClientError as e:
+            self._handle_client_error(e, key=key, bucket=self._bucket)
+
+        url = self.get_url(key)
+        logger.debug("Streamed upload %s to %s", key, url)
+        return url
+
     def upload_file_multipart(
         self,
         file_path: Path,
