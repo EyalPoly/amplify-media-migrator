@@ -5,6 +5,7 @@ import random
 import threading
 from typing import Callable, Dict, List, Optional
 
+from ..auth.token_manager import CognitoTokenManager
 from ..sources.google_drive import DriveFile, GoogleDriveClient
 from ..targets.amplify_storage import AmplifyStorageClient
 from ..targets.graphql_client import GraphQLClient
@@ -33,6 +34,8 @@ class MigrationEngine:
         retry_attempts: int = 3,
         retry_delay_seconds: int = 5,
         default_media_public: bool = False,
+        token_manager: Optional[CognitoTokenManager] = None,
+        initial_id_token: Optional[str] = None,
     ) -> None:
         self._drive_client = drive_client
         self._storage_client = storage_client
@@ -43,6 +46,8 @@ class MigrationEngine:
         self._retry_attempts = retry_attempts
         self._retry_delay_seconds = retry_delay_seconds
         self._default_media_public = default_media_public
+        self._token_manager = token_manager
+        self._initial_id_token = initial_id_token
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._on_progress: Optional[Callable[[str, FileStatus], None]] = None
         self._on_total_known: Optional[Callable[[int], None]] = None
@@ -159,6 +164,8 @@ class MigrationEngine:
         pending_ids = set(self._progress.get_pending_file_ids())
         files_to_process = [f for f in files if f.id in pending_ids]
 
+        if self._token_manager and self._initial_id_token:
+            self._token_manager.start(self._initial_id_token)
         _autosave_stop = self._start_autosave() if not dry_run else None
         try:
             tasks = [self._process_with_semaphore(f, dry_run) for f in files_to_process]
@@ -167,6 +174,8 @@ class MigrationEngine:
             if _autosave_stop is not None:
                 _autosave_stop.set()
                 self._progress.save()
+            if self._token_manager:
+                self._token_manager.stop()
 
     async def resume(
         self,
@@ -238,6 +247,8 @@ class MigrationEngine:
             self._on_total_known(len(files_to_process))
 
         logger.info("Starting processing of %d files...", len(files_to_process))
+        if self._token_manager and self._initial_id_token:
+            self._token_manager.start(self._initial_id_token)
         _autosave_stop = self._start_autosave() if not dry_run else None
         try:
             tasks = [self._process_with_semaphore(f, dry_run) for f in files_to_process]
@@ -246,6 +257,8 @@ class MigrationEngine:
             if _autosave_stop is not None:
                 _autosave_stop.set()
                 self._progress.save()
+            if self._token_manager:
+                self._token_manager.stop()
 
     async def _fetch_and_evaluate_needs_review(
         self, file_id: str

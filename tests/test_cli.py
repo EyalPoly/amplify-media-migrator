@@ -276,8 +276,9 @@ class TestAuthenticateCognito:
         mock_cognito.get_id_token.return_value = "test-token"
         mock_cognito_cls.return_value = mock_cognito
 
-        result = _authenticate_cognito(mock_cfg)
-        assert result == "test-token"
+        id_token, cognito = _authenticate_cognito(mock_cfg)
+        assert id_token == "test-token"
+        assert cognito is mock_cognito
 
     @patch("amplify_media_migrator.cli.click.prompt", return_value="password")
     @patch("amplify_auth.CognitoAuthProvider")
@@ -652,6 +653,7 @@ class TestMigrateCommand:
         mock_run_progress: MagicMock,
         runner: CliRunner,
     ) -> None:
+        mock_auth_c.return_value = ("test-token", MagicMock())
         mock_engine = MagicMock()
         mock_engine.get_summary.return_value = {
             "total": 10,
@@ -683,6 +685,7 @@ class TestMigrateCommand:
         mock_run_progress: MagicMock,
         runner: CliRunner,
     ) -> None:
+        mock_auth_c.return_value = ("test-token", MagicMock())
         mock_engine = MagicMock()
         mock_engine.get_summary.return_value = {
             "total": 0,
@@ -715,6 +718,7 @@ class TestResumeCommand:
         mock_run_progress: MagicMock,
         runner: CliRunner,
     ) -> None:
+        mock_auth_c.return_value = ("test-token", MagicMock())
         mock_engine = MagicMock()
         mock_engine.get_summary.return_value = {
             "total": 10,
@@ -748,6 +752,7 @@ class TestResumeCommand:
         mock_run_progress: MagicMock,
         runner: CliRunner,
     ) -> None:
+        mock_auth_c.return_value = ("test-token", MagicMock())
         mock_engine = MagicMock()
         mock_engine.get_summary.return_value = {
             "total": 0,
@@ -778,6 +783,7 @@ class TestResumeCommand:
         mock_run_progress: MagicMock,
         runner: CliRunner,
     ) -> None:
+        mock_auth_c.return_value = ("test-token", MagicMock())
         mock_engine = MagicMock()
         mock_engine.get_summary.return_value = {
             "total": 5,
@@ -814,6 +820,7 @@ class TestMigrateVerbose:
         mock_run_progress: MagicMock,
         runner: CliRunner,
     ) -> None:
+        mock_auth_c.return_value = ("test-token", MagicMock())
         mock_engine = MagicMock()
         mock_engine.get_summary.return_value = {
             "total": 0,
@@ -852,7 +859,7 @@ class TestValidateCommand:
         mock_drive = MagicMock()
         mock_drive.list_files.return_value = iter([])
         mock_auth_g.return_value = mock_drive
-        mock_auth_c.return_value = "test-token"
+        mock_auth_c.return_value = ("test-token", MagicMock())
         mock_storage = MagicMock()
         mock_storage.file_exists.return_value = False
         mock_storage_cls.return_value = mock_storage
@@ -896,7 +903,7 @@ class TestValidateCommand:
         mock_cfg.get.side_effect = lambda key: "test-value"
         mock_load.return_value = mock_cfg
         mock_auth_g.side_effect = SystemExit(1)
-        mock_auth_c.return_value = "test-token"
+        mock_auth_c.return_value = ("test-token", MagicMock())
 
         with patch("amplify_media_migrator.cli.AmplifyStorageClient") as mock_s, patch(
             "amplify_media_migrator.cli.GraphQLClient"
