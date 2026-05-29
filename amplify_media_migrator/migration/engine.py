@@ -380,6 +380,14 @@ class MigrationEngine:
             except MigratorError as e:
                 self._mark_failed(file, parsed, f"Stream upload failed: {e}")
                 return
+
+            self._progress.update_file(
+                file_id=file.id,
+                filename=file.name,
+                status=FileStatus.UPLOADED,
+                sequential_ids=parsed.sequential_ids,
+                s3_url=s3_url,
+            )
         else:
             try:
                 data = await self._download_with_retry(file.id)
@@ -520,8 +528,10 @@ class MigrationEngine:
                 )
                 return s3_url
             except AuthenticationError:
+                stream.cancel()
                 raise
             except RateLimitError as e:
+                stream.cancel()
                 last_error = e
                 delay = e.retry_after or self._retry_delay_seconds * (2**attempt)
                 delay += random.uniform(0, 1)
@@ -534,6 +544,7 @@ class MigrationEngine:
                 )
                 await asyncio.sleep(delay)
             except MigratorError as e:
+                stream.cancel()
                 last_error = e
                 delay = self._retry_delay_seconds * (2**attempt) + random.uniform(0, 1)
                 logger.warning(

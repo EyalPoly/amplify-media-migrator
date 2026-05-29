@@ -3,7 +3,7 @@ import time
 
 import pytest
 
-from amplify_media_migrator.utils.stream import _QueueStream
+from amplify_media_migrator.utils.stream import _QueueStream, _StreamCancelled
 
 pytestmark = pytest.mark.unit
 
@@ -69,6 +69,34 @@ class TestQueueStream:
         s.read(8)  # consume first chunk — unblocks writer
         t.join(timeout=1.0)
         assert "second_written" in written
+
+    def test_cancel_unblocks_blocked_writer(self) -> None:
+        s = _QueueStream(maxsize=1)
+        s.write(b"a")  # fills the queue
+        outcome = []
+
+        def writer() -> None:
+            try:
+                s.write(b"b")  # blocks: queue full
+                s.write(b"c")  # raises once cancelled
+            except _StreamCancelled:
+                outcome.append("cancelled")
+
+        t = threading.Thread(target=writer, daemon=True)
+        t.start()
+        time.sleep(0.05)  # let writer block on the full queue
+        s.cancel()
+        t.join(timeout=1.0)
+
+        assert not t.is_alive()
+        assert outcome == ["cancelled"]
+
+    def test_close_write_after_cancel_does_not_block(self) -> None:
+        s = _QueueStream(maxsize=1)
+        s.write(b"a")  # fills the queue
+        s.cancel()
+        # Would block forever on a full queue without the cancel short-circuit.
+        s.close_write()
 
     def test_concurrent_write_read(self) -> None:
         s = _QueueStream()
