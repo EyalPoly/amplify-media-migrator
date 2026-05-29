@@ -506,3 +506,78 @@ class TestRateLimiterIntegration:
         list(connected_client.list_files("folder-1"))
 
         mock_limiter.acquire.assert_called_once()
+
+
+class TestOpenDownloadStream:
+    def test_streams_downloaded_chunks(
+        self, client: GoogleDriveClient, mock_service: MagicMock
+    ) -> None:
+        client._connected = True
+        mock_service.files.return_value.get_media.return_value = MagicMock()
+
+        def fake_downloader_init(
+            fd: object, request: object, chunksize: int = 0
+        ) -> MagicMock:
+            instance = MagicMock()
+            call_count = [0]
+
+            def next_chunk() -> object:
+                call_count[0] += 1
+                fd.write(b"chunk_data")  # type: ignore[attr-defined]
+                done = call_count[0] >= 2
+                return MagicMock(), done
+
+            instance.next_chunk = next_chunk
+            return instance
+
+        with patch(
+            "amplify_media_migrator.sources.google_drive.build",
+            return_value=mock_service,
+        ), patch(
+            "amplify_media_migrator.sources.google_drive.MediaIoBaseDownload",
+            side_effect=fake_downloader_init,
+        ):
+            stream = client.open_download_stream("file-123")
+            chunks = []
+            while True:
+                data = stream.read(100)
+                if not data:
+                    break
+                chunks.append(data)
+
+        assert b"".join(chunks) == b"chunk_datachunk_data"
+        mock_service.files.return_value.get_media.assert_called_once_with(
+            fileId="file-123", supportsAllDrives=True
+        )
+
+    def test_download_error_propagates_to_stream(
+        self, client: GoogleDriveClient, mock_service: MagicMock
+    ) -> None:
+        client._connected = True
+        mock_service.files.return_value.get_media.side_effect = Exception(
+            "network error"
+        )
+
+        with patch(
+            "amplify_media_migrator.sources.google_drive.build",
+            return_value=mock_service,
+        ):
+            stream = client.open_download_stream("file-bad")
+            with pytest.raises(DownloadError, match="network error"):
+                stream.read(100)
+
+    def test_http_error_propagates_to_stream(
+        self, client: GoogleDriveClient, mock_service: MagicMock
+    ) -> None:
+        client._connected = True
+        mock_service.files.return_value.get_media.side_effect = _make_http_error(
+            404, "not found"
+        )
+
+        with patch(
+            "amplify_media_migrator.sources.google_drive.build",
+            return_value=mock_service,
+        ):
+            stream = client.open_download_stream("file-bad")
+            with pytest.raises(DownloadError):
+                stream.read(100)

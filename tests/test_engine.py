@@ -1602,3 +1602,118 @@ class TestGetSummary:
         assert summary["failed"] == 1
         assert summary["needs_review"] == 1
         assert summary["pending"] == 0
+
+
+class TestProcessFileStreaming:
+    """process_file uses the stream path for files above large_file_threshold_mb."""
+
+    @pytest.fixture
+    def streaming_engine(
+        self,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+        mapper: FilenameMapper,
+    ) -> MigrationEngine:
+        return MigrationEngine(
+            drive_client=drive_client,
+            storage_client=storage_client,
+            graphql_client=graphql_client,
+            progress_tracker=progress,
+            mapper=mapper,
+            concurrency=2,
+            retry_attempts=2,
+            retry_delay_seconds=0,
+            large_file_threshold_mb=25,
+        )
+
+    def test_small_file_uses_in_memory_path(
+        self,
+        streaming_engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        file = _drive_file("f1", "123.jpg", size=10 * 1024 * 1024)
+        graphql_client.get_observations_by_sequential_ids.return_value = {
+            123: _observation("obs-1", 123)
+        }
+        drive_client.download_file.return_value = b"photo bytes"
+        storage_client.upload_file.return_value = (
+            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/123.jpg"
+        )
+        graphql_client.create_media.return_value = _media("media-1")
+
+        asyncio.run(streaming_engine.process_file(file))
+
+        drive_client.download_file.assert_called_once_with("f1")
+        drive_client.open_download_stream.assert_not_called()
+        storage_client.upload_file_stream.assert_not_called()
+
+    def test_large_file_uses_streaming_path(
+        self,
+        streaming_engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        file = _drive_file("f2", "456.mp4", "video/mp4", size=50 * 1024 * 1024)
+        graphql_client.get_observations_by_sequential_ids.return_value = {
+            456: _observation("obs-2", 456)
+        }
+        storage_client.open_download_stream = MagicMock()
+        drive_client.open_download_stream.return_value = MagicMock()
+        storage_client.upload_file_stream.return_value = (
+            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-2/456.mp4"
+        )
+        graphql_client.create_media.return_value = _media(
+            "media-2",
+            url="https://bucket.s3.us-east-1.amazonaws.com/media/obs-2/456.mp4",
+            obs_id="obs-2",
+        )
+
+        asyncio.run(streaming_engine.process_file(file))
+
+        drive_client.open_download_stream.assert_called_once_with("f2")
+        storage_client.upload_file_stream.assert_called_once()
+        storage_client.upload_file.assert_not_called()
+        drive_client.download_file.assert_not_called()
+
+        fp = progress.files["f2"]
+        assert fp.status == FileStatus.COMPLETED
+        assert (
+            fp.s3_url == "https://bucket.s3.us-east-1.amazonaws.com/media/obs-2/456.mp4"
+        )
+
+    def test_unknown_size_uses_in_memory_path(
+        self,
+        streaming_engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        file = _drive_file("f3", "789.jpg", size=0)
+        graphql_client.get_observations_by_sequential_ids.return_value = {
+            789: _observation("obs-3", 789)
+        }
+        drive_client.download_file.return_value = b"photo bytes"
+        storage_client.upload_file.return_value = (
+            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-3/789.jpg"
+        )
+        graphql_client.create_media.return_value = _media(
+            "media-3",
+            url="https://bucket.s3.us-east-1.amazonaws.com/media/obs-3/789.jpg",
+            obs_id="obs-3",
+        )
+
+        asyncio.run(streaming_engine.process_file(file))
+
+        drive_client.download_file.assert_called_once_with("f3")
+        drive_client.open_download_stream.assert_not_called()
