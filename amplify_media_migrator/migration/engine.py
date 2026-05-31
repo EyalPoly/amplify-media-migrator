@@ -3,7 +3,7 @@ import concurrent.futures
 import logging
 import random
 import threading
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Coroutine, Dict, List, Optional
 
 from ..auth.token_manager import CognitoTokenManager
 from ..sources.google_drive import DriveFile, GoogleDriveClient
@@ -180,7 +180,7 @@ class MigrationEngine:
         _autosave_stop = self._start_autosave() if not dry_run else None
         try:
             tasks = [self._process_with_semaphore(f, dry_run) for f in files_to_process]
-            await asyncio.gather(*tasks)
+            await self._gather_chunked(tasks)
         finally:
             if _autosave_stop is not None:
                 _autosave_stop.set()
@@ -264,13 +264,18 @@ class MigrationEngine:
         _autosave_stop = self._start_autosave() if not dry_run else None
         try:
             tasks = [self._process_with_semaphore(f, dry_run) for f in files_to_process]
-            await asyncio.gather(*tasks)
+            await self._gather_chunked(tasks)
         finally:
             if _autosave_stop is not None:
                 _autosave_stop.set()
                 self._progress.save()
             if self._token_manager:
                 self._token_manager.stop()
+
+    async def _gather_chunked(self, tasks: List[Coroutine[Any, Any, None]]) -> None:
+        chunk_size = self._concurrency * 4
+        for i in range(0, len(tasks), chunk_size):
+            await asyncio.gather(*tasks[i : i + chunk_size])
 
     async def _fetch_and_evaluate_needs_review(
         self, file_id: str
