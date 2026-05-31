@@ -1219,6 +1219,80 @@ class TestResume:
         assert progress.files["f1"].status == FileStatus.ORPHAN
 
 
+class TestChunkedGather:
+    def test_runs_all_tasks(self, engine: MigrationEngine) -> None:
+        results: list = []
+
+        async def _task(n: int) -> None:
+            results.append(n)
+
+        tasks = [_task(i) for i in range(20)]
+        asyncio.run(engine._gather_chunked(tasks))
+
+        assert sorted(results) == list(range(20))
+
+    def test_gathers_in_multiple_batches(self, engine: MigrationEngine) -> None:
+        # concurrency=2 -> CHUNK_SIZE = 8; 20 tasks -> 3 batches
+        async def _noop() -> None:
+            return None
+
+        tasks = [_noop() for _ in range(20)]
+        batch_sizes: list = []
+        real_gather = asyncio.gather
+
+        async def _spy_gather(*coros: object) -> object:
+            batch_sizes.append(len(coros))
+            return await real_gather(*coros)
+
+        with patch(
+            "amplify_media_migrator.migration.engine.asyncio.gather",
+            side_effect=_spy_gather,
+        ):
+            asyncio.run(engine._gather_chunked(tasks))
+
+        assert batch_sizes == [8, 8, 4]
+
+    def test_single_batch_when_below_chunk_size(self, engine: MigrationEngine) -> None:
+        async def _noop() -> None:
+            return None
+
+        tasks = [_noop() for _ in range(3)]
+        batch_sizes: list = []
+        real_gather = asyncio.gather
+
+        async def _spy_gather(*coros: object) -> object:
+            batch_sizes.append(len(coros))
+            return await real_gather(*coros)
+
+        with patch(
+            "amplify_media_migrator.migration.engine.asyncio.gather",
+            side_effect=_spy_gather,
+        ):
+            asyncio.run(engine._gather_chunked(tasks))
+
+        assert batch_sizes == [3]
+
+    def test_raise_in_early_chunk_skips_later_chunks(
+        self, engine: MigrationEngine
+    ) -> None:
+        # concurrency=2 -> CHUNK_SIZE = 8; a raise in the first chunk must
+        # abort before the second chunk's tasks run.
+        ran: list = []
+
+        async def _ok(n: int) -> None:
+            ran.append(n)
+
+        async def _boom() -> None:
+            raise AuthenticationError("token expired")
+
+        tasks = [_ok(i) for i in range(7)] + [_boom()] + [_ok(i) for i in range(8, 16)]
+
+        with pytest.raises(AuthenticationError):
+            asyncio.run(engine._gather_chunked(tasks))
+
+        assert all(n < 8 for n in ran)
+
+
 class TestProgressCallback:
     def test_callback_called_on_completion(
         self,
