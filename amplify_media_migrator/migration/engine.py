@@ -8,7 +8,7 @@ from typing import Callable, Dict, List, Optional
 from ..auth.token_manager import CognitoTokenManager
 from ..sources.google_drive import DriveFile, GoogleDriveClient
 from ..targets.amplify_storage import AmplifyStorageClient
-from ..targets.graphql_client import GraphQLClient
+from ..targets.graphql_client import GraphQLClient, Observation
 from ..utils.exceptions import (
     AuthenticationError,
     DownloadError,
@@ -302,6 +302,24 @@ class MigrationEngine:
         async with self._get_semaphore():
             await self.process_file(file, dry_run)
 
+    async def _lookup_observations(
+        self, sequential_ids: List[int]
+    ) -> Dict[int, Observation]:
+        tasks = [
+            asyncio.to_thread(
+                self._graphql_client.get_observation_by_sequential_id, sid
+            )
+            for sid in sequential_ids
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        observations: Dict[int, Observation] = {}
+        for sid, result in zip(sequential_ids, results):
+            if isinstance(result, BaseException):
+                raise result
+            if result is not None:
+                observations[sid] = result
+        return observations
+
     async def process_file(
         self,
         file: DriveFile,
@@ -322,10 +340,7 @@ class MigrationEngine:
             return
 
         try:
-            observations = await asyncio.to_thread(
-                self._graphql_client.get_observations_by_sequential_ids,
-                parsed.sequential_ids,
-            )
+            observations = await self._lookup_observations(parsed.sequential_ids)
         except AuthenticationError:
             raise
         except MigratorError as e:
