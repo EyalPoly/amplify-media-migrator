@@ -80,6 +80,14 @@ def storage_client() -> MagicMock:
 def graphql_client() -> MagicMock:
     mock = MagicMock(spec=GraphQLClient)
     mock.get_media_by_url.return_value = None
+
+    def _lookup_single(sequential_id: int) -> Optional[Observation]:
+        batch = mock.get_observations_by_sequential_ids.return_value
+        if isinstance(batch, dict):
+            return batch.get(sequential_id)
+        return None
+
+    mock.get_observation_by_sequential_id.side_effect = _lookup_single
     return mock
 
 
@@ -352,6 +360,47 @@ class TestProcessFileRange:
         assert fp.status == FileStatus.PARTIAL
         assert fp.media_ids == ["m-a"]
 
+    def test_lookups_run_concurrently(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        import threading
+
+        progress.load("folder-1")
+        file = _drive_file("f1", "6000-6001.jpg")
+
+        in_flight = threading.Barrier(2, timeout=2.0)
+        max_concurrent = {"value": 0}
+        lock = threading.Lock()
+        active = {"value": 0}
+
+        def slow_lookup(seq_id: int) -> Observation:
+            with lock:
+                active["value"] += 1
+                max_concurrent["value"] = max(max_concurrent["value"], active["value"])
+            in_flight.wait()
+            with lock:
+                active["value"] -= 1
+            return _observation(f"obs-{seq_id}", seq_id)
+
+        graphql_client.get_observation_by_sequential_id.side_effect = slow_lookup
+        drive_client.download_file.return_value = b"photo"
+        storage_client.upload_file.return_value = (
+            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-6000/6000-6001.jpg"
+        )
+        graphql_client.create_media.side_effect = [
+            _media("m-a", obs_id="obs-6000"),
+            _media("m-b", obs_id="obs-6001"),
+        ]
+
+        asyncio.run(engine.process_file(file))
+
+        assert max_concurrent["value"] == 2
+
     def test_some_observations_not_found(
         self,
         engine: MigrationEngine,
@@ -623,7 +672,7 @@ class TestErrorHandling:
         progress.load("folder-1")
         file = _drive_file("f1", "6602.jpg")
 
-        graphql_client.get_observations_by_sequential_ids.side_effect = GraphQLError(
+        graphql_client.get_observation_by_sequential_id.side_effect = GraphQLError(
             "Server error", operation="query"
         )
 
@@ -641,7 +690,7 @@ class TestErrorHandling:
         progress.load("folder-1")
         file = _drive_file("f1", "6602.jpg")
 
-        graphql_client.get_observations_by_sequential_ids.side_effect = (
+        graphql_client.get_observation_by_sequential_id.side_effect = (
             AuthenticationError("Token expired", provider="cognito")
         )
 
@@ -828,10 +877,10 @@ class TestMigrate:
         ]
         obs1 = _observation("obs-1", 6602)
         obs2 = _observation("obs-2", 6603)
-        graphql_client.get_observations_by_sequential_ids.side_effect = [
-            {6602: obs1},
-            {6603: obs2},
-        ]
+        graphql_client.get_observation_by_sequential_id.side_effect = lambda sid: {
+            6602: obs1,
+            6603: obs2,
+        }.get(sid)
         drive_client.download_file.return_value = b"data"
         storage_client.upload_file.side_effect = [
             "https://bucket/media/obs-1/6602.jpg",
@@ -1459,10 +1508,10 @@ class TestEdgeCases:
         files = [_drive_file(f"f{i}", f"{6600 + i}.jpg") for i in range(5)]
         drive_client.list_files.return_value = files
 
-        def mock_get_obs(seq_ids: list) -> dict:
-            return {sid: _observation(f"obs-{sid}", sid) for sid in seq_ids}
+        def mock_get_obs(seq_id: int) -> Observation:
+            return _observation(f"obs-{seq_id}", seq_id)
 
-        graphql_client.get_observations_by_sequential_ids.side_effect = mock_get_obs
+        graphql_client.get_observation_by_sequential_id.side_effect = mock_get_obs
         drive_client.download_file.return_value = b"data"
         storage_client.upload_file.side_effect = [
             f"https://bucket/media/obs-{6600 + i}/{6600 + i}.jpg" for i in range(5)
