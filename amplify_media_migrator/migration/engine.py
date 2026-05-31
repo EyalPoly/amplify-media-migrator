@@ -50,6 +50,7 @@ class MigrationEngine:
         self._large_file_threshold_bytes: int = large_file_threshold_mb * 1024 * 1024
         self._token_manager = token_manager
         self._initial_id_token = initial_id_token
+        self._uploaded_urls: set[str] = set()
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._on_progress: Optional[Callable[[str, FileStatus], None]] = None
         self._on_total_known: Optional[Callable[[int], None]] = None
@@ -73,6 +74,13 @@ class MigrationEngine:
 
     def _reset_run_state(self) -> None:
         self._semaphore = None
+
+    def _populate_url_cache(self) -> None:
+        self._uploaded_urls = {
+            fp.s3_url
+            for fp in self._progress.files.values()
+            if fp.s3_url and fp.status == FileStatus.COMPLETED
+        }
 
     def _start_autosave(self, interval: float = 30.0) -> threading.Event:
         stop = threading.Event()
@@ -131,6 +139,7 @@ class MigrationEngine:
             concurrent.futures.ThreadPoolExecutor(max_workers=self._concurrency)
         )
         self._progress.load(folder_id)
+        self._populate_url_cache()
 
         files = await asyncio.to_thread(
             lambda: list(self._drive_client.list_files(folder_id))
@@ -191,6 +200,7 @@ class MigrationEngine:
         )
         if not self._progress.load(folder_id):
             raise MigratorError(f"No progress file found for folder {folder_id}")
+        self._populate_url_cache()
 
         pending_ids = set(self._progress.get_pending_file_ids())
         failed_ids = set(self._progress.get_failed_file_ids())
@@ -337,6 +347,18 @@ class MigrationEngine:
         s3_key = self._mapper.build_s3_key(first_obs.id, file.name)
         s3_url = self._storage_client.get_url(s3_key)
 
+        if s3_url in self._uploaded_urls:
+            self._progress.update_file(
+                file_id=file.id,
+                filename=file.name,
+                status=FileStatus.COMPLETED,
+                sequential_ids=parsed.sequential_ids,
+                observation_ids=[obs.id for obs in observations.values()],
+                s3_url=s3_url,
+            )
+            self._notify_progress(file.name, FileStatus.COMPLETED)
+            return
+
         try:
             existing_media = await asyncio.to_thread(
                 self._graphql_client.get_media_by_url, s3_url
@@ -462,6 +484,7 @@ class MigrationEngine:
         else:
             status = FileStatus.COMPLETED
             error = None
+            self._uploaded_urls.add(s3_url)
 
         self._progress.update_file(
             file_id=file.id,

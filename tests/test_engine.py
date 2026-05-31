@@ -480,6 +480,99 @@ class TestDuplicateCheck:
         assert progress.files["f1"].status == FileStatus.COMPLETED
 
 
+class TestUrlCache:
+    def test_populate_cache_from_completed_files(
+        self,
+        engine: MigrationEngine,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        progress.update_file(
+            "f1", "6602.jpg", FileStatus.COMPLETED, s3_url="https://u/1"
+        )
+        progress.update_file("f2", "6603.jpg", FileStatus.PENDING)
+        progress.update_file(
+            "f3", "6604.jpg", FileStatus.UPLOADED, s3_url="https://u/3"
+        )
+        progress.update_file("f4", "6605.jpg", FileStatus.COMPLETED)
+
+        engine._populate_url_cache()
+
+        assert engine._uploaded_urls == {"https://u/1"}
+
+    def test_skips_duplicate_check_when_url_cached(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        file = _drive_file("f1", "6602.jpg")
+        obs = _observation("obs-1", 6602)
+        graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
+        engine._uploaded_urls.add(
+            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/6602.jpg"
+        )
+
+        asyncio.run(engine.process_file(file))
+
+        graphql_client.get_media_by_url.assert_not_called()
+        drive_client.download_file.assert_not_called()
+        fp = progress.files["f1"]
+        assert fp.status == FileStatus.COMPLETED
+        assert fp.observation_ids == ["obs-1"]
+        assert (
+            fp.s3_url
+            == "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/6602.jpg"
+        )
+
+    def test_calls_duplicate_check_when_url_not_cached(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        file = _drive_file("f1", "6602.jpg")
+        obs = _observation("obs-1", 6602)
+        graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
+        graphql_client.get_media_by_url.return_value = None
+        drive_client.download_file.return_value = b"data"
+        storage_client.upload_file.return_value = (
+            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/6602.jpg"
+        )
+        graphql_client.create_media.return_value = _media("m-1")
+
+        asyncio.run(engine.process_file(file))
+
+        graphql_client.get_media_by_url.assert_called_once()
+
+    def test_adds_url_to_cache_after_completion(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        file = _drive_file("f1", "6602.jpg")
+        obs = _observation("obs-1", 6602)
+        url = "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/6602.jpg"
+        graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
+        graphql_client.get_media_by_url.return_value = None
+        drive_client.download_file.return_value = b"data"
+        storage_client.upload_file.return_value = url
+        graphql_client.create_media.return_value = _media("m-1")
+
+        asyncio.run(engine.process_file(file))
+
+        assert url in engine._uploaded_urls
+
+
 class TestErrorHandling:
     def test_download_error_marks_failed(
         self,
