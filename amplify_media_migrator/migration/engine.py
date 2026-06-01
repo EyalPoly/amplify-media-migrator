@@ -187,6 +187,7 @@ class MigrationEngine:
                 self._progress.save()
             if self._token_manager:
                 self._token_manager.stop()
+            self._graphql_client.close()
 
     async def resume(
         self,
@@ -271,6 +272,7 @@ class MigrationEngine:
                 self._progress.save()
             if self._token_manager:
                 self._token_manager.stop()
+            self._graphql_client.close()
 
     async def _gather_chunked(self, tasks: List[Coroutine[Any, Any, None]]) -> None:
         chunk_size = self._concurrency * 4

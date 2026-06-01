@@ -81,6 +81,8 @@ class GraphQLClient:
         self._region = region
         self._id_token: Optional[str] = None
         self._local = threading.local()
+        self._sessions_lock = threading.Lock()
+        self._all_sessions: List[requests.Session] = []
 
     def _get_session(self) -> requests.Session:
         if not hasattr(self._local, "session"):
@@ -90,8 +92,21 @@ class GraphQLClient:
             adapter = requests.adapters.HTTPAdapter(pool_connections=1, pool_maxsize=1)
             s.mount("https://", adapter)
             self._local.session = s
+            with self._sessions_lock:
+                self._all_sessions.append(s)
         session: requests.Session = self._local.session
         return session
+
+    def close(self) -> None:
+        # Sessions live in per-thread storage, so the calling thread cannot
+        # reach other threads' slots. Close every registered session instead,
+        # and reset the thread-locals so any later call creates a fresh one.
+        with self._sessions_lock:
+            sessions = self._all_sessions
+            self._all_sessions = []
+            self._local = threading.local()
+        for session in sessions:
+            session.close()
 
     def connect(self, id_token: str) -> None:
         self._id_token = id_token
