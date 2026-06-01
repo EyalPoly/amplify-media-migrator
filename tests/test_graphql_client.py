@@ -1,3 +1,5 @@
+import threading
+from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -548,3 +550,47 @@ class TestGetMediaByUrl:
         assert result is not None
         assert result.id == "media-1"
         assert mock_post.call_count == 2
+
+
+def test_close_closes_sessions_from_all_threads(client: GraphQLClient) -> None:
+    created: Dict[int, Any] = {}
+    add_lock = threading.Lock()
+
+    def make_session() -> None:
+        session = client._get_session()
+        with add_lock:
+            created[threading.get_ident()] = session
+
+    with patch("requests.Session", side_effect=lambda: MagicMock()):
+        threads = [threading.Thread(target=make_session) for _ in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        client.close()
+
+    assert len(created) == 3
+    for session in created.values():
+        session.close.assert_called_once_with()
+
+
+def test_close_noop_when_no_sessions(client: GraphQLClient) -> None:
+    client.close()
+
+    with patch("requests.Session", side_effect=lambda: MagicMock()):
+        session = client._get_session()
+        client.close()
+        client.close()
+
+    session.close.assert_called_once_with()
+
+
+def test_get_session_after_close_creates_new_session(client: GraphQLClient) -> None:
+    with patch("requests.Session", side_effect=lambda: MagicMock()):
+        first = client._get_session()
+        client.close()
+        second = client._get_session()
+
+    assert first is not second
+    first.close.assert_called_once_with()

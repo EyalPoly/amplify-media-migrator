@@ -1933,3 +1933,77 @@ class TestProcessFileStreaming:
 
         drive_client.download_file.assert_called_once_with("f3")
         drive_client.open_download_stream.assert_not_called()
+
+
+class TestSessionCleanup:
+    def test_migrate_closes_graphql_client(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        graphql_client: MagicMock,
+    ) -> None:
+        drive_client.list_files.return_value = []
+
+        asyncio.run(engine.migrate("folder-1"))
+
+        graphql_client.close.assert_called_once_with()
+
+    def test_migrate_closes_graphql_client_on_error(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        graphql_client: MagicMock,
+    ) -> None:
+        drive_client.list_files.return_value = [_drive_file("f1", "6602.jpg")]
+        graphql_client.get_observation_by_sequential_id.side_effect = (
+            AuthenticationError("token expired", provider="cognito")
+        )
+
+        with pytest.raises(AuthenticationError):
+            asyncio.run(engine.migrate("folder-1"))
+
+        graphql_client.close.assert_called_once_with()
+
+    def test_resume_closes_graphql_client(
+        self,
+        engine: MigrationEngine,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        progress.update_file(
+            file_id="f1",
+            filename="6602.jpg",
+            status=FileStatus.FAILED,
+            error="Previous error",
+            sequential_ids=[6602],
+        )
+        progress.save()
+
+        asyncio.run(engine.resume("folder-1"))
+
+        graphql_client.close.assert_called_once_with()
+
+    def test_resume_closes_graphql_client_on_error(
+        self,
+        engine: MigrationEngine,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        progress.update_file(
+            file_id="f1",
+            filename="6602.jpg",
+            status=FileStatus.FAILED,
+            error="Previous error",
+            sequential_ids=[6602],
+        )
+        progress.save()
+        graphql_client.get_observation_by_sequential_id.side_effect = (
+            AuthenticationError("token expired", provider="cognito")
+        )
+
+        with pytest.raises(AuthenticationError):
+            asyncio.run(engine.resume("folder-1"))
+
+        graphql_client.close.assert_called_once_with()
