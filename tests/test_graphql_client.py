@@ -1,5 +1,5 @@
 import threading
-from typing import Any, Dict
+from typing import Any, List
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -553,13 +553,13 @@ class TestGetMediaByUrl:
 
 
 def test_close_closes_sessions_from_all_threads(client: GraphQLClient) -> None:
-    created: Dict[int, Any] = {}
+    created: List[Any] = []
     add_lock = threading.Lock()
 
     def make_session() -> None:
         session = client._get_session()
         with add_lock:
-            created[threading.get_ident()] = session
+            created.append(session)
 
     with patch("requests.Session", side_effect=lambda: MagicMock()):
         threads = [threading.Thread(target=make_session) for _ in range(3)]
@@ -571,7 +571,7 @@ def test_close_closes_sessions_from_all_threads(client: GraphQLClient) -> None:
         client.close()
 
     assert len(created) == 3
-    for session in created.values():
+    for session in created:
         session.close.assert_called_once_with()
 
 
