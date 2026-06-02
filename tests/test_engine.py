@@ -983,7 +983,7 @@ class TestMigrate:
         storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
         graphql_client.create_media.return_value = _media("m-1")
 
-        asyncio.run(engine.migrate("folder-1"))
+        asyncio.run(engine.migrate("folder-1", rescan=True))
 
         assert progress.files["f1"].status == FileStatus.COMPLETED
 
@@ -1005,7 +1005,7 @@ class TestMigrate:
         # Still an invalid name after "rename"
         drive_client.list_files.return_value = [_drive_file("f1", "still_bad.pdf")]
 
-        asyncio.run(engine.migrate("folder-1"))
+        asyncio.run(engine.migrate("folder-1", rescan=True))
 
         assert progress.files["f1"].status == FileStatus.NEEDS_REVIEW
 
@@ -1035,7 +1035,7 @@ class TestMigrate:
         storage_client.upload_file.return_value = "https://bucket/media/obs-2/6603.jpg"
         graphql_client.create_media.return_value = _media("m-2", obs_id="obs-2")
 
-        asyncio.run(engine.migrate("folder-1"))
+        asyncio.run(engine.migrate("folder-1", rescan=True))
 
         assert drive_client.download_file.call_count == 1
         assert progress.files["f2"].status == FileStatus.COMPLETED
