@@ -140,18 +140,30 @@ Rename problematic files in Google Drive, then re-scan.
 
 ### 5. Migrate
 
-Run the full migration:
+Run the migration. The command is safe to re-run — completed files are skipped
+and previously failed files are retried automatically:
 
 ```bash
 amplify-media-migrator migrate --folder-id FOLDER_ID
 ```
 
-Options:
+The first run scans the Drive folder and queues every valid file. Later runs
+rebuild the work list from the saved progress file (no folder re-scan) and
+retry any `failed` / `partial` / interrupted files. To re-scan the folder and
+pick up files added to Drive since the first run:
 
-| Flag | Default | Description |
-|---|---|---|
-| `--dry-run` | off | Validate without uploading |
-| `--verbose` | off | Enable debug logging |
+```bash
+amplify-media-migrator migrate --folder-id FOLDER_ID --rescan
+```
+
+Orphan files (no matching Observation) are skipped by default. To re-attempt
+them after the Observations exist in the database:
+
+```bash
+amplify-media-migrator migrate --folder-id FOLDER_ID --retry-orphans
+```
+
+Use `--dry-run` to validate without downloading or uploading.
 
 ### 6. Check Status
 
@@ -161,21 +173,7 @@ View migration progress (no auth required):
 amplify-media-migrator status --folder-id FOLDER_ID
 ```
 
-### 7. Resume
-
-Resume an interrupted migration (retries failed/pending files):
-
-```bash
-amplify-media-migrator resume --folder-id FOLDER_ID
-```
-
-To also retry files previously marked as `orphan` (e.g. after fixing a misconfigured API endpoint or after observations were added to the database):
-
-```bash
-amplify-media-migrator resume --folder-id FOLDER_ID --retry-orphans
-```
-
-### 8. Export
+### 7. Export
 
 Export files by status for offline review:
 
@@ -205,8 +203,7 @@ Files that don't match any pattern are marked as `needs_review`.
 | `validate --folder-id ID` | Pre-flight service connectivity checks |
 | `scan --folder-id ID` | Scan folder and validate file patterns |
 | `review --folder-id ID` | Show files needing manual review |
-| `migrate --folder-id ID` | Run full migration |
-| `resume --folder-id ID [--retry-orphans]` | Resume interrupted migration; `--retry-orphans` re-processes orphan files |
+| `migrate --folder-id ID [--rescan] [--retry-orphans] [--dry-run]` | Run or resume migration. Safe to re-run; retries failures automatically. `--rescan` re-lists Drive for new files; `--retry-orphans` re-processes orphan files |
 | `status --folder-id ID` | Show migration progress |
 | `export --folder-id ID --status STATUS --output FILE` | Export files by status |
 
