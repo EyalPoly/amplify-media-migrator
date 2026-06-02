@@ -896,6 +896,68 @@ class TestMigrate:
         assert progress.files["f1"].status == FileStatus.COMPLETED
         assert progress.files["f2"].status == FileStatus.COMPLETED
 
+    def test_existing_progress_skips_drive_scan_and_retries_failed(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        graphql_client: MagicMock,
+        storage_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        progress.update_file(
+            file_id="f1",
+            filename="6602.jpg",
+            status=FileStatus.FAILED,
+            error="Previous error",
+            sequential_ids=[6602],
+        )
+        progress.save()
+
+        drive_client.get_file_metadata.return_value = _drive_file("f1", "6602.jpg")
+        obs = _observation("obs-1", 6602)
+        graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
+        drive_client.download_file.return_value = b"data"
+        storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
+        graphql_client.create_media.return_value = _media("m-1")
+
+        asyncio.run(engine.migrate("folder-1"))
+
+        assert progress.files["f1"].status == FileStatus.COMPLETED
+        drive_client.list_files.assert_not_called()
+
+    def test_rescan_lists_drive_and_picks_up_new_file(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        graphql_client: MagicMock,
+        storage_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        progress.update_file(
+            file_id="f1",
+            filename="6602.jpg",
+            status=FileStatus.COMPLETED,
+        )
+        progress.save()
+
+        drive_client.list_files.return_value = [
+            _drive_file("f1", "6602.jpg"),
+            _drive_file("f2", "6603.jpg"),
+        ]
+        obs2 = _observation("obs-2", 6603)
+        graphql_client.get_observations_by_sequential_ids.return_value = {6603: obs2}
+        drive_client.download_file.return_value = b"data"
+        storage_client.upload_file.return_value = "https://bucket/media/obs-2/6603.jpg"
+        graphql_client.create_media.return_value = _media("m-2", obs_id="obs-2")
+
+        asyncio.run(engine.migrate("folder-1", rescan=True))
+
+        drive_client.list_files.assert_called_once()
+        assert progress.files["f2"].status == FileStatus.COMPLETED
+        assert drive_client.download_file.call_count == 1
+
     def test_reprocesses_needs_review_files_after_rename(
         self,
         engine: MigrationEngine,
