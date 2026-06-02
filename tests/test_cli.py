@@ -16,7 +16,6 @@ from amplify_media_migrator.cli import (
     export,
     main,
     migrate,
-    resume,
     review,
     scan,
     show,
@@ -750,79 +749,12 @@ class TestMigrateCommand:
         assert result.exit_code == 0
         assert "[DRY RUN]" in result.output
 
-
-class TestResumeCommand:
     @patch("amplify_media_migrator.cli._run_with_progress")
     @patch("amplify_media_migrator.cli._create_engine")
     @patch("amplify_media_migrator.cli._authenticate_cognito")
     @patch("amplify_media_migrator.cli._authenticate_google")
     @patch("amplify_media_migrator.cli._load_config")
-    def test_resume_success(
-        self,
-        mock_load: MagicMock,
-        mock_auth_g: MagicMock,
-        mock_auth_c: MagicMock,
-        mock_create: MagicMock,
-        mock_run_progress: MagicMock,
-        runner: CliRunner,
-    ) -> None:
-        mock_auth_c.return_value = ("test-token", MagicMock())
-        mock_engine = MagicMock()
-        mock_engine.get_summary.return_value = {
-            "total": 10,
-            "completed": 10,
-            "failed": 0,
-            "orphan": 0,
-            "needs_review": 0,
-            "partial": 0,
-            "pending": 0,
-        }
-        mock_create.return_value = mock_engine
-
-        result = runner.invoke(main, ["resume", "--folder-id", "test"])
-        assert result.exit_code == 0
-        assert "Starting resume" in result.output
-        assert "Migration Summary" in result.output
-
-    @patch("amplify_media_migrator.cli._run_with_progress")
-    @patch("amplify_media_migrator.cli._create_engine")
-    @patch("amplify_media_migrator.cli._authenticate_cognito")
-    @patch("amplify_media_migrator.cli._authenticate_google")
-    @patch("amplify_media_migrator.cli._load_config")
-    @patch("amplify_media_migrator.cli.setup_logging")
-    def test_resume_verbose(
-        self,
-        mock_setup_logging: MagicMock,
-        mock_load: MagicMock,
-        mock_auth_g: MagicMock,
-        mock_auth_c: MagicMock,
-        mock_create: MagicMock,
-        mock_run_progress: MagicMock,
-        runner: CliRunner,
-    ) -> None:
-        mock_auth_c.return_value = ("test-token", MagicMock())
-        mock_engine = MagicMock()
-        mock_engine.get_summary.return_value = {
-            "total": 0,
-            "completed": 0,
-            "failed": 0,
-            "orphan": 0,
-            "needs_review": 0,
-            "partial": 0,
-            "pending": 0,
-        }
-        mock_create.return_value = mock_engine
-
-        result = runner.invoke(main, ["resume", "--folder-id", "test", "--verbose"])
-        assert result.exit_code == 0
-        mock_setup_logging.assert_called_once_with(level="DEBUG")
-
-    @patch("amplify_media_migrator.cli._run_with_progress")
-    @patch("amplify_media_migrator.cli._create_engine")
-    @patch("amplify_media_migrator.cli._authenticate_cognito")
-    @patch("amplify_media_migrator.cli._authenticate_google")
-    @patch("amplify_media_migrator.cli._load_config")
-    def test_resume_retry_orphans_flag(
+    def test_migrate_rescan_and_retry_orphans_flags(
         self,
         mock_load: MagicMock,
         mock_auth_g: MagicMock,
@@ -845,10 +777,11 @@ class TestResumeCommand:
         mock_create.return_value = mock_engine
 
         result = runner.invoke(
-            main, ["resume", "--folder-id", "test", "--retry-orphans"]
+            main,
+            ["migrate", "--folder-id", "test", "--rescan", "--retry-orphans"],
         )
         assert result.exit_code == 0
-        assert "Starting resume" in result.output
+        assert "Starting migration" in result.output
 
 
 class TestMigrateVerbose:
