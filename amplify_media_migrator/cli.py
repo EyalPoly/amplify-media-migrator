@@ -347,13 +347,28 @@ def scan(folder_id: str) -> None:
 @main.command()
 @click.option("--folder-id", required=True, help="Google Drive folder ID")
 @click.option("--dry-run", is_flag=True, help="Validate without uploading")
+@click.option(
+    "--rescan",
+    is_flag=True,
+    help="Re-list the Drive folder to pick up newly-added files",
+)
+@click.option(
+    "--retry-orphans", is_flag=True, help="Retry files previously marked as orphan"
+)
 @click.option("--verbose", is_flag=True, help="Enable debug logging")
 def migrate(
     folder_id: str,
     dry_run: bool,
+    rescan: bool,
+    retry_orphans: bool,
     verbose: bool,
 ) -> None:
-    """Run the full media migration."""
+    """Run or resume the media migration.
+
+    Safe to re-run: completed files are skipped and previously failed files are
+    retried automatically. The first run scans the Drive folder; later runs
+    rebuild work from the saved progress file unless --rescan is passed.
+    """
     if verbose:
         setup_logging(level="DEBUG")
 
@@ -365,47 +380,10 @@ def migrate(
     if dry_run:
         click.echo("\n[DRY RUN] No files will be downloaded or uploaded.\n")
 
-    click.echo(f"Starting migration for folder {folder_id}...")
-
-    try:
-        _run_with_progress(
-            lambda: engine.migrate(folder_id, dry_run),
-            engine,
-            desc="Migrating",
-        )
-    except MigratorError as e:
-        click.echo(f"\nError: {e}", err=True)
-        raise SystemExit(1)
-
-    _print_summary(engine.get_summary())
-
-
-@main.command()
-@click.option("--folder-id", required=True, help="Google Drive folder ID")
-@click.option("--dry-run", is_flag=True, help="Validate without uploading")
-@click.option(
-    "--retry-orphans", is_flag=True, help="Retry files previously marked as orphan"
-)
-@click.option("--verbose", is_flag=True, help="Enable debug logging")
-def resume(
-    folder_id: str,
-    dry_run: bool,
-    retry_orphans: bool,
-    verbose: bool,
-) -> None:
-    """Resume an interrupted migration."""
-    if verbose:
-        setup_logging(level="DEBUG")
-
-    cfg = _load_config()
-    drive_client = _authenticate_google(cfg)
-    id_token, cognito_provider = _authenticate_cognito(cfg)
-    engine = _create_engine(cfg, drive_client, id_token, cognito_provider)
-
     _peek = ProgressTracker()
     if _peek.load(folder_id):
         _s = _peek.get_summary()
-        retryable = (
+        retrying = (
             _s.failed
             + _s.partial
             + _s.downloaded
@@ -413,17 +391,17 @@ def resume(
             + (_s.orphan if retry_orphans else 0)
         )
         click.echo(
-            f"\nResuming: {_s.pending} pending  |  {retryable} retrying"
+            f"Resuming: {_s.pending} pending  |  {retrying} retrying"
             f"  |  {_s.needs_review} needs-review check  |  {_s.completed} already done"
         )
 
-    click.echo(f"Starting resume for folder {folder_id}...\n")
+    click.echo(f"Starting migration for folder {folder_id}...")
 
     try:
         _run_with_progress(
-            lambda: engine.resume(folder_id, dry_run, retry_orphans),
+            lambda: engine.migrate(folder_id, dry_run, retry_orphans, rescan),
             engine,
-            desc="Resuming",
+            desc="Migrating",
         )
     except MigratorError as e:
         click.echo(f"\nError: {e}", err=True)

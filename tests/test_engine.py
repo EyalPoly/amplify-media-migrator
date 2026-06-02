@@ -896,6 +896,68 @@ class TestMigrate:
         assert progress.files["f1"].status == FileStatus.COMPLETED
         assert progress.files["f2"].status == FileStatus.COMPLETED
 
+    def test_existing_progress_skips_drive_scan_and_retries_failed(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        graphql_client: MagicMock,
+        storage_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        progress.update_file(
+            file_id="f1",
+            filename="6602.jpg",
+            status=FileStatus.FAILED,
+            error="Previous error",
+            sequential_ids=[6602],
+        )
+        progress.save()
+
+        drive_client.get_file_metadata.return_value = _drive_file("f1", "6602.jpg")
+        obs = _observation("obs-1", 6602)
+        graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
+        drive_client.download_file.return_value = b"data"
+        storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
+        graphql_client.create_media.return_value = _media("m-1")
+
+        asyncio.run(engine.migrate("folder-1"))
+
+        assert progress.files["f1"].status == FileStatus.COMPLETED
+        drive_client.list_files.assert_not_called()
+
+    def test_rescan_lists_drive_and_picks_up_new_file(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        graphql_client: MagicMock,
+        storage_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        progress.update_file(
+            file_id="f1",
+            filename="6602.jpg",
+            status=FileStatus.COMPLETED,
+        )
+        progress.save()
+
+        drive_client.list_files.return_value = [
+            _drive_file("f1", "6602.jpg"),
+            _drive_file("f2", "6603.jpg"),
+        ]
+        obs2 = _observation("obs-2", 6603)
+        graphql_client.get_observations_by_sequential_ids.return_value = {6603: obs2}
+        drive_client.download_file.return_value = b"data"
+        storage_client.upload_file.return_value = "https://bucket/media/obs-2/6603.jpg"
+        graphql_client.create_media.return_value = _media("m-2", obs_id="obs-2")
+
+        asyncio.run(engine.migrate("folder-1", rescan=True))
+
+        drive_client.list_files.assert_called_once()
+        assert progress.files["f2"].status == FileStatus.COMPLETED
+        assert drive_client.download_file.call_count == 1
+
     def test_reprocesses_needs_review_files_after_rename(
         self,
         engine: MigrationEngine,
@@ -921,7 +983,7 @@ class TestMigrate:
         storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
         graphql_client.create_media.return_value = _media("m-1")
 
-        asyncio.run(engine.migrate("folder-1"))
+        asyncio.run(engine.migrate("folder-1", rescan=True))
 
         assert progress.files["f1"].status == FileStatus.COMPLETED
 
@@ -943,7 +1005,7 @@ class TestMigrate:
         # Still an invalid name after "rename"
         drive_client.list_files.return_value = [_drive_file("f1", "still_bad.pdf")]
 
-        asyncio.run(engine.migrate("folder-1"))
+        asyncio.run(engine.migrate("folder-1", rescan=True))
 
         assert progress.files["f1"].status == FileStatus.NEEDS_REVIEW
 
@@ -973,20 +1035,13 @@ class TestMigrate:
         storage_client.upload_file.return_value = "https://bucket/media/obs-2/6603.jpg"
         graphql_client.create_media.return_value = _media("m-2", obs_id="obs-2")
 
-        asyncio.run(engine.migrate("folder-1"))
+        asyncio.run(engine.migrate("folder-1", rescan=True))
 
         assert drive_client.download_file.call_count == 1
         assert progress.files["f2"].status == FileStatus.COMPLETED
 
 
-class TestResume:
-    def test_raises_when_no_progress_file(
-        self,
-        engine: MigrationEngine,
-    ) -> None:
-        with pytest.raises(MigratorError, match="No progress file"):
-            asyncio.run(engine.resume("nonexistent-folder"))
-
+class TestMigrateFromProgress:
     def test_retries_failed_files(
         self,
         engine: MigrationEngine,
@@ -1012,7 +1067,7 @@ class TestResume:
         storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
         graphql_client.create_media.return_value = _media("m-1")
 
-        asyncio.run(engine.resume("folder-1"))
+        asyncio.run(engine.migrate("folder-1"))
 
         assert progress.files["f1"].status == FileStatus.COMPLETED
 
@@ -1051,7 +1106,7 @@ class TestResume:
             _media("m-b", obs_id="obs-b"),
         ]
 
-        asyncio.run(engine.resume("folder-1"))
+        asyncio.run(engine.migrate("folder-1"))
 
         fp = progress.files["f1"]
         assert fp.status == FileStatus.COMPLETED
@@ -1070,7 +1125,7 @@ class TestResume:
         )
         progress.save()
 
-        asyncio.run(engine.resume("folder-1"))
+        asyncio.run(engine.migrate("folder-1"))
 
     def test_reprocesses_needs_review_files_after_rename(
         self,
@@ -1097,7 +1152,7 @@ class TestResume:
         storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
         graphql_client.create_media.return_value = _media("m-1")
 
-        asyncio.run(engine.resume("folder-1"))
+        asyncio.run(engine.migrate("folder-1"))
 
         assert progress.files["f1"].status == FileStatus.COMPLETED
 
@@ -1118,7 +1173,7 @@ class TestResume:
 
         drive_client.get_file_metadata.return_value = _drive_file("f1", "still_bad.pdf")
 
-        asyncio.run(engine.resume("folder-1"))
+        asyncio.run(engine.migrate("folder-1"))
 
         assert progress.files["f1"].status == FileStatus.NEEDS_REVIEW
 
@@ -1141,7 +1196,7 @@ class TestResume:
         drive_client.get_file_metadata.return_value = _drive_file("f1", "still_bad.pdf")
 
         # Should complete without raising
-        asyncio.run(engine.resume("folder-1"))
+        asyncio.run(engine.migrate("folder-1"))
         drive_client.get_file_metadata.assert_called_once()
 
     def test_retries_orphan_files_when_flag_set(
@@ -1169,7 +1224,7 @@ class TestResume:
         storage_client.upload_file.return_value = "https://bucket/media/obs-144/144.jpg"
         graphql_client.create_media.return_value = _media("m-1", obs_id="obs-144")
 
-        asyncio.run(engine.resume("folder-1", retry_orphans=True))
+        asyncio.run(engine.migrate("folder-1", retry_orphans=True))
 
         assert progress.files["f1"].status == FileStatus.COMPLETED
 
@@ -1189,7 +1244,7 @@ class TestResume:
         )
         progress.save()
 
-        asyncio.run(engine.resume("folder-1"))
+        asyncio.run(engine.migrate("folder-1"))
 
         assert progress.files["f1"].status == FileStatus.ORPHAN
         drive_client.get_file_metadata.assert_not_called()
@@ -1214,7 +1269,7 @@ class TestResume:
         drive_client.get_file_metadata.return_value = _drive_file("f1", "144.jpg")
         graphql_client.get_observations_by_sequential_ids.return_value = {}
 
-        asyncio.run(engine.resume("folder-1", retry_orphans=True))
+        asyncio.run(engine.migrate("folder-1", retry_orphans=True))
 
         assert progress.files["f1"].status == FileStatus.ORPHAN
 
@@ -1634,7 +1689,7 @@ class TestEdgeCases:
         progress.save()
 
         with patch.object(progress, "get_pending_file_ids", return_value=["ghost-id"]):
-            asyncio.run(engine.resume("folder-1"))
+            asyncio.run(engine.migrate("folder-1"))
 
         assert "ghost-id" not in progress.files
 
@@ -1961,49 +2016,5 @@ class TestSessionCleanup:
 
         with pytest.raises(AuthenticationError):
             asyncio.run(engine.migrate("folder-1"))
-
-        graphql_client.close.assert_called_once_with()
-
-    def test_resume_closes_graphql_client(
-        self,
-        engine: MigrationEngine,
-        graphql_client: MagicMock,
-        progress: ProgressTracker,
-    ) -> None:
-        progress.load("folder-1")
-        progress.update_file(
-            file_id="f1",
-            filename="6602.jpg",
-            status=FileStatus.FAILED,
-            error="Previous error",
-            sequential_ids=[6602],
-        )
-        progress.save()
-
-        asyncio.run(engine.resume("folder-1"))
-
-        graphql_client.close.assert_called_once_with()
-
-    def test_resume_closes_graphql_client_on_error(
-        self,
-        engine: MigrationEngine,
-        graphql_client: MagicMock,
-        progress: ProgressTracker,
-    ) -> None:
-        progress.load("folder-1")
-        progress.update_file(
-            file_id="f1",
-            filename="6602.jpg",
-            status=FileStatus.FAILED,
-            error="Previous error",
-            sequential_ids=[6602],
-        )
-        progress.save()
-        graphql_client.get_observation_by_sequential_id.side_effect = (
-            AuthenticationError("token expired", provider="cognito")
-        )
-
-        with pytest.raises(AuthenticationError):
-            asyncio.run(engine.resume("folder-1"))
 
         graphql_client.close.assert_called_once_with()

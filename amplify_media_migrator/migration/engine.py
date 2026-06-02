@@ -133,6 +133,8 @@ class MigrationEngine:
         self,
         folder_id: str,
         dry_run: bool = False,
+        retry_orphans: bool = False,
+        rescan: bool = False,
     ) -> None:
         self._reset_run_state()
         asyncio.get_running_loop().set_default_executor(
@@ -141,16 +143,49 @@ class MigrationEngine:
         self._progress.load(folder_id)
         self._populate_url_cache()
 
+        do_scan = (not self._progress.files) or rescan
+        if do_scan:
+            files_to_process = await self._build_work_with_scan(
+                folder_id, dry_run, retry_orphans
+            )
+        else:
+            files_to_process = await self._build_work_from_progress(retry_orphans)
+
+        if self._on_total_known:
+            self._on_total_known(len(files_to_process))
+
+        await self._process_files(files_to_process, dry_run)
+
+    def _collect_retryable_ids(self, retry_orphans: bool) -> set[str]:
+        ids = (
+            set(self._progress.get_failed_file_ids())
+            | set(self._progress.get_partial_file_ids())
+            | set(self._progress.get_interrupted_file_ids())
+        )
+        if retry_orphans:
+            ids |= set(self._progress.get_orphan_file_ids())
+        return ids
+
+    def _requeue_as_pending(self, file_ids: set[str]) -> None:
+        for file_id in file_ids:
+            fp = self._progress.get_file(file_id)
+            if fp:
+                self._progress.update_file(
+                    file_id=file_id,
+                    filename=fp.filename,
+                    status=FileStatus.PENDING,
+                )
+
+    async def _build_work_with_scan(
+        self, folder_id: str, dry_run: bool, retry_orphans: bool
+    ) -> List[DriveFile]:
         files = await asyncio.to_thread(
             lambda: list(self._drive_client.list_files(folder_id))
         )
         self._progress.set_total_files(len(files))
-        if self._on_total_known:
-            self._on_total_known(len(files))
 
         for drive_file in files:
             existing = self._progress.files.get(drive_file.id)
-            # Re-evaluate needs_review files in case they were renamed in Drive
             if existing is not None and existing.status != FileStatus.NEEDS_REVIEW:
                 continue
             parsed = self._mapper.parse(drive_file.name)
@@ -169,60 +204,23 @@ class MigrationEngine:
                     sequential_ids=parsed.sequential_ids,
                 )
 
+        self._requeue_as_pending(self._collect_retryable_ids(retry_orphans))
+
         if not dry_run:
             self._progress.save()
 
         pending_ids = set(self._progress.get_pending_file_ids())
-        files_to_process = [f for f in files if f.id in pending_ids]
+        return [f for f in files if f.id in pending_ids]
 
-        if not dry_run and self._token_manager and self._initial_id_token:
-            self._token_manager.start(self._initial_id_token)
-        _autosave_stop = self._start_autosave() if not dry_run else None
-        try:
-            tasks = [self._process_with_semaphore(f, dry_run) for f in files_to_process]
-            await self._gather_chunked(tasks)
-        finally:
-            if _autosave_stop is not None:
-                _autosave_stop.set()
-                self._progress.save()
-            if self._token_manager:
-                self._token_manager.stop()
-            self._graphql_client.close()
-
-    async def resume(
-        self,
-        folder_id: str,
-        dry_run: bool = False,
-        retry_orphans: bool = False,
-    ) -> None:
-        self._reset_run_state()
-        asyncio.get_running_loop().set_default_executor(
-            concurrent.futures.ThreadPoolExecutor(max_workers=self._concurrency)
-        )
-        if not self._progress.load(folder_id):
-            raise MigratorError(f"No progress file found for folder {folder_id}")
-        self._populate_url_cache()
-
+    async def _build_work_from_progress(self, retry_orphans: bool) -> List[DriveFile]:
         pending_ids = set(self._progress.get_pending_file_ids())
-        failed_ids = set(self._progress.get_failed_file_ids())
-        partial_ids = set(self._progress.get_partial_file_ids())
-        interrupted_ids = set(self._progress.get_interrupted_file_ids())
+        retryable_ids = self._collect_retryable_ids(retry_orphans)
         needs_review_ids = set(self._progress.get_needs_review_file_ids())
-        orphan_ids = (
-            set(self._progress.get_orphan_file_ids()) if retry_orphans else set()
-        )
-        retryable_ids = failed_ids | partial_ids | interrupted_ids | orphan_ids
-        file_ids_to_process = pending_ids | retryable_ids
 
-        if not file_ids_to_process and not needs_review_ids:
-            logger.info("No files to resume")
-            return
+        self._requeue_as_pending(retryable_ids)
 
-        # Build DriveFile objects from stored progress data — no API call needed
-        # since we already have id and name; only needs_review files require a
-        # fresh metadata fetch to detect renames.
         files_to_process: List[DriveFile] = []
-        for file_id in file_ids_to_process:
+        for file_id in pending_ids | retryable_ids:
             fp = self._progress.get_file(file_id)
             if fp is None:
                 logger.warning(
@@ -233,16 +231,6 @@ class MigrationEngine:
                 DriveFile(id=file_id, name=fp.filename, mime_type="", size=0)
             )
 
-        for file_id in retryable_ids:
-            fp = self._progress.get_file(file_id)
-            if fp:
-                self._progress.update_file(
-                    file_id=file_id,
-                    filename=fp.filename,
-                    status=FileStatus.PENDING,
-                )
-
-        # Re-evaluate needs_review files in parallel — they may have been renamed in Drive
         if needs_review_ids:
             logger.info(
                 "Checking %d needs_review files for renames...", len(needs_review_ids)
@@ -251,14 +239,15 @@ class MigrationEngine:
                 self._fetch_and_evaluate_needs_review(file_id)
                 for file_id in needs_review_ids
             ]
-            review_results = await asyncio.gather(*review_tasks)
-            for drive_file in review_results:
+            for drive_file in await asyncio.gather(*review_tasks):
                 if drive_file is not None:
                     files_to_process.append(drive_file)
 
-        if self._on_total_known:
-            self._on_total_known(len(files_to_process))
+        return files_to_process
 
+    async def _process_files(
+        self, files_to_process: List[DriveFile], dry_run: bool
+    ) -> None:
         logger.info("Starting processing of %d files...", len(files_to_process))
         if not dry_run and self._token_manager and self._initial_id_token:
             self._token_manager.start(self._initial_id_token)
