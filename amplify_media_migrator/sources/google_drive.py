@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Iterator, NoReturn, Optional
 
+import httplib2  # type: ignore[import-untyped]
+from google_auth_httplib2 import AuthorizedHttp  # type: ignore[import-untyped]
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
@@ -38,9 +40,11 @@ class GoogleDriveClient:
         self,
         credentials: Any,
         rate_limiter: Optional[RateLimiter] = None,
+        timeout_seconds: float = 300.0,
     ) -> None:
         self._credentials = credentials
         self._rate_limiter = rate_limiter or RateLimiter()
+        self._timeout_seconds = timeout_seconds
         self._connected = False
         # Each thread gets its own service instance (httplib2 is not thread-safe)
         self._local = threading.local()
@@ -53,7 +57,14 @@ class GoogleDriveClient:
         if not self._connected:
             raise DownloadError("Not connected to Google Drive. Call connect() first.")
         if not hasattr(self._local, "service"):
-            self._local.service = build("drive", "v3", credentials=self._credentials)
+            # Wrap the credentials in an http with an explicit socket timeout.
+            # httplib2 defaults to no timeout, so a stalled TCP read during a
+            # chunked download would otherwise block the worker thread forever.
+            authed_http = AuthorizedHttp(
+                self._credentials,
+                http=httplib2.Http(timeout=self._timeout_seconds),
+            )
+            self._local.service = build("drive", "v3", http=authed_http)
         return self._local.service
 
     def _handle_http_error(

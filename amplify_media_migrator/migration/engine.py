@@ -3,7 +3,7 @@ import concurrent.futures
 import logging
 import random
 import threading
-from typing import Any, Callable, Coroutine, Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from ..auth.token_manager import CognitoTokenManager
 from ..sources.google_drive import DriveFile, GoogleDriveClient
@@ -51,7 +51,6 @@ class MigrationEngine:
         self._token_manager = token_manager
         self._initial_id_token = initial_id_token
         self._uploaded_urls: set[str] = set()
-        self._semaphore: Optional[asyncio.Semaphore] = None
         self._on_progress: Optional[Callable[[str, FileStatus], None]] = None
         self._on_total_known: Optional[Callable[[int], None]] = None
         self._on_file_started: Optional[Callable[[str], None]] = None
@@ -66,14 +65,6 @@ class MigrationEngine:
 
     def set_file_started_callback(self, callback: Callable[[str], None]) -> None:
         self._on_file_started = callback
-
-    def _get_semaphore(self) -> asyncio.Semaphore:
-        if self._semaphore is None:
-            self._semaphore = asyncio.Semaphore(self._concurrency)
-        return self._semaphore
-
-    def _reset_run_state(self) -> None:
-        self._semaphore = None
 
     def _populate_url_cache(self) -> None:
         self._uploaded_urls = {
@@ -136,7 +127,6 @@ class MigrationEngine:
         retry_orphans: bool = False,
         rescan: bool = False,
     ) -> None:
-        self._reset_run_state()
         asyncio.get_running_loop().set_default_executor(
             concurrent.futures.ThreadPoolExecutor(max_workers=self._concurrency)
         )
@@ -253,8 +243,7 @@ class MigrationEngine:
             self._token_manager.start(self._initial_id_token)
         _autosave_stop = self._start_autosave() if not dry_run else None
         try:
-            tasks = [self._process_with_semaphore(f, dry_run) for f in files_to_process]
-            await self._gather_chunked(tasks)
+            await self._run_workers(files_to_process, dry_run)
         finally:
             if _autosave_stop is not None:
                 _autosave_stop.set()
@@ -263,10 +252,32 @@ class MigrationEngine:
                 self._token_manager.stop()
             self._graphql_client.close()
 
-    async def _gather_chunked(self, tasks: List[Coroutine[Any, Any, None]]) -> None:
-        chunk_size = self._concurrency * 4
-        for i in range(0, len(tasks), chunk_size):
-            await asyncio.gather(*tasks[i : i + chunk_size])
+    async def _run_workers(
+        self, files_to_process: List[DriveFile], dry_run: bool
+    ) -> None:
+        queue: "asyncio.Queue[DriveFile]" = asyncio.Queue()
+        for file in files_to_process:
+            queue.put_nowait(file)
+
+        aborted: List[BaseException] = []
+
+        async def worker() -> None:
+            while not aborted:
+                try:
+                    file = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
+                try:
+                    await self.process_file(file, dry_run)
+                except BaseException as exc:  # noqa: BLE001
+                    aborted.append(exc)
+                    return
+
+        worker_count = min(self._concurrency, len(files_to_process))
+        await asyncio.gather(*(worker() for _ in range(worker_count)))
+
+        if aborted:
+            raise aborted[0]
 
     async def _fetch_and_evaluate_needs_review(
         self, file_id: str
@@ -289,14 +300,6 @@ class MigrationEngine:
                 "Could not fetch metadata for needs_review file %s: %s", file_id, e
             )
         return None
-
-    async def _process_with_semaphore(
-        self,
-        file: DriveFile,
-        dry_run: bool,
-    ) -> None:
-        async with self._get_semaphore():
-            await self.process_file(file, dry_run)
 
     async def _lookup_observations(
         self, sequential_ids: List[int]
@@ -402,7 +405,7 @@ class MigrationEngine:
         stored = self._progress.get_file(file.id)
         if stored and stored.status == FileStatus.UPLOADED and stored.s3_url:
             s3_url = stored.s3_url
-        elif file.size > 0 and file.size > self._large_file_threshold_bytes:
+        elif file.size == 0 or file.size > self._large_file_threshold_bytes:
             content_type = get_content_type(parsed.extension)
             try:
                 s3_url = await self._stream_upload_with_retry(
