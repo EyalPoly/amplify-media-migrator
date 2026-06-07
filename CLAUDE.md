@@ -632,6 +632,13 @@ export LOG_LEVEL=DEBUG
 
 ---
 
+## Versioning (see .github/workflows/publish.yml)
+
+- On PR merge to main, CI auto-bumps the PATCH version, tags, and publishes to PyPI. Never bump the patch manually — CI owns it.
+- For a feature (minor) or breaking change (major), bump `version` in setup.py by hand AND include `[skip bump]` in the PR title or a commit message, so CI doesn't add an extra patch on top.
+
+---
+
 ## Common Issues & Troubleshooting
 
 | Issue | Solution |
