@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Iterator, NoReturn, Optional
 
-import httplib2  # type: ignore[import-untyped]
-from google_auth_httplib2 import AuthorizedHttp  # type: ignore[import-untyped]
+import httplib2
+from google_auth_httplib2 import AuthorizedHttp
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
