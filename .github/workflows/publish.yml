@@ -16,14 +16,14 @@ jobs:
       packages: write
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         ref: main
         token: ${{ secrets.PAT_TOKEN }}
         fetch-depth: 0
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: "3.11"
 
@@ -118,7 +118,7 @@ jobs:
         twine upload dist/*
 
     - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v3
       with:
         tag_name: v${{ steps.bump_version.outputs.new_version || steps.current_version.outputs.new_version }}
         name: Release v${{ steps.bump_version.outputs.new_version || steps.current_version.outputs.new_version }}
