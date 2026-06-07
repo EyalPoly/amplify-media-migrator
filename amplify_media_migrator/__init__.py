@@ -1,6 +1,11 @@
 """Amplify Media Migrator - Migrate media files from Google Drive to AWS Amplify Storage."""
 
-__version__ = "1.0.0"
+import importlib.metadata
+
+try:
+    __version__ = importlib.metadata.version("amplify-media-migrator")
+except importlib.metadata.PackageNotFoundError:
+    __version__ = "0.0.0"
 
 from .config import ConfigManager
 from .migration.engine import MigrationEngine
