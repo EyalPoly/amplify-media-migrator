@@ -918,7 +918,9 @@ class TestMigrate:
         obs = _observation("obs-1", 6602)
         graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
         drive_client.download_file.return_value = b"data"
-        storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
+        storage_client.upload_file_stream.return_value = (
+            "https://bucket/media/obs-1/6602.jpg"
+        )
         graphql_client.create_media.return_value = _media("m-1")
 
         asyncio.run(engine.migrate("folder-1"))
@@ -1064,7 +1066,9 @@ class TestMigrateFromProgress:
         obs = _observation("obs-1", 6602)
         graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
         drive_client.download_file.return_value = b"data"
-        storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
+        storage_client.upload_file_stream.return_value = (
+            "https://bucket/media/obs-1/6602.jpg"
+        )
         graphql_client.create_media.return_value = _media("m-1")
 
         asyncio.run(engine.migrate("folder-1"))
@@ -1098,7 +1102,7 @@ class TestMigrateFromProgress:
             6001: obs_b,
         }
         drive_client.download_file.return_value = b"data"
-        storage_client.upload_file.return_value = (
+        storage_client.upload_file_stream.return_value = (
             "https://bucket/media/obs-a/6000-6001.jpg"
         )
         graphql_client.create_media.side_effect = [
@@ -1221,7 +1225,9 @@ class TestMigrateFromProgress:
         obs = _observation("obs-144", 144)
         graphql_client.get_observations_by_sequential_ids.return_value = {144: obs}
         drive_client.download_file.return_value = b"data"
-        storage_client.upload_file.return_value = "https://bucket/media/obs-144/144.jpg"
+        storage_client.upload_file_stream.return_value = (
+            "https://bucket/media/obs-144/144.jpg"
+        )
         graphql_client.create_media.return_value = _media("m-1", obs_id="obs-144")
 
         asyncio.run(engine.migrate("folder-1", retry_orphans=True))
@@ -1274,78 +1280,60 @@ class TestMigrateFromProgress:
         assert progress.files["f1"].status == FileStatus.ORPHAN
 
 
-class TestChunkedGather:
-    def test_runs_all_tasks(self, engine: MigrationEngine) -> None:
-        results: list = []
-
-        async def _task(n: int) -> None:
-            results.append(n)
-
-        tasks = [_task(i) for i in range(20)]
-        asyncio.run(engine._gather_chunked(tasks))
-
-        assert sorted(results) == list(range(20))
-
-    def test_gathers_in_multiple_batches(self, engine: MigrationEngine) -> None:
-        # concurrency=2 -> CHUNK_SIZE = 8; 20 tasks -> 3 batches
-        async def _noop() -> None:
-            return None
-
-        tasks = [_noop() for _ in range(20)]
-        batch_sizes: list = []
-        real_gather = asyncio.gather
-
-        async def _spy_gather(*coros: object) -> object:
-            batch_sizes.append(len(coros))
-            return await real_gather(*coros)
-
-        with patch(
-            "amplify_media_migrator.migration.engine.asyncio.gather",
-            side_effect=_spy_gather,
-        ):
-            asyncio.run(engine._gather_chunked(tasks))
-
-        assert batch_sizes == [8, 8, 4]
-
-    def test_single_batch_when_below_chunk_size(self, engine: MigrationEngine) -> None:
-        async def _noop() -> None:
-            return None
-
-        tasks = [_noop() for _ in range(3)]
-        batch_sizes: list = []
-        real_gather = asyncio.gather
-
-        async def _spy_gather(*coros: object) -> object:
-            batch_sizes.append(len(coros))
-            return await real_gather(*coros)
-
-        with patch(
-            "amplify_media_migrator.migration.engine.asyncio.gather",
-            side_effect=_spy_gather,
-        ):
-            asyncio.run(engine._gather_chunked(tasks))
-
-        assert batch_sizes == [3]
-
-    def test_raise_in_early_chunk_skips_later_chunks(
-        self, engine: MigrationEngine
+class TestRunWorkers:
+    def test_runs_all_files(
+        self, engine: MigrationEngine, progress: ProgressTracker
     ) -> None:
-        # concurrency=2 -> CHUNK_SIZE = 8; a raise in the first chunk must
-        # abort before the second chunk's tasks run.
-        ran: list = []
+        progress.load("folder-1")
+        files = [_drive_file(f"f{i}", f"{6000 + i}.jpg") for i in range(20)]
+        processed: list = []
 
-        async def _ok(n: int) -> None:
-            ran.append(n)
+        async def fake_process(file: DriveFile, dry_run: bool = False) -> None:
+            processed.append(file.id)
 
-        async def _boom() -> None:
-            raise AuthenticationError("token expired")
+        engine.process_file = fake_process  # type: ignore[method-assign]
+        asyncio.run(engine._run_workers(files, dry_run=True))
 
-        tasks = [_ok(i) for i in range(7)] + [_boom()] + [_ok(i) for i in range(8, 16)]
+        assert sorted(processed) == sorted(f.id for f in files)
+
+    def test_caps_in_flight_at_concurrency(
+        self, engine: MigrationEngine, progress: ProgressTracker
+    ) -> None:
+        # concurrency=2: never more than 2 files in flight at once.
+        progress.load("folder-1")
+        files = [_drive_file(f"f{i}", f"{6000 + i}.jpg") for i in range(10)]
+        max_concurrent = {"value": 0}
+        active = {"value": 0}
+
+        async def fake_process(file: DriveFile, dry_run: bool = False) -> None:
+            active["value"] += 1
+            max_concurrent["value"] = max(max_concurrent["value"], active["value"])
+            await asyncio.sleep(0.01)
+            active["value"] -= 1
+
+        engine.process_file = fake_process  # type: ignore[method-assign]
+        asyncio.run(engine._run_workers(files, dry_run=True))
+
+        assert max_concurrent["value"] == 2
+
+    def test_auth_error_stops_pulling_new_files(
+        self, engine: MigrationEngine, progress: ProgressTracker
+    ) -> None:
+        progress.load("folder-1")
+        files = [_drive_file(f"f{i}", f"{6000 + i}.jpg") for i in range(20)]
+        processed: list = []
+
+        async def fake_process(file: DriveFile, dry_run: bool = False) -> None:
+            processed.append(file.id)
+            if file.id == "f0":
+                raise AuthenticationError("token expired")
+
+        engine.process_file = fake_process  # type: ignore[method-assign]
 
         with pytest.raises(AuthenticationError):
-            asyncio.run(engine._gather_chunked(tasks))
+            asyncio.run(engine._run_workers(files, dry_run=True))
 
-        assert all(n < 8 for n in ran)
+        assert len(processed) < len(files)
 
 
 class TestProgressCallback:
@@ -1961,7 +1949,7 @@ class TestProcessFileStreaming:
             fp.s3_url == "https://bucket.s3.us-east-1.amazonaws.com/media/obs-2/456.mp4"
         )
 
-    def test_unknown_size_uses_in_memory_path(
+    def test_unknown_size_uses_streaming_path(
         self,
         streaming_engine: MigrationEngine,
         drive_client: MagicMock,
@@ -1969,13 +1957,16 @@ class TestProcessFileStreaming:
         graphql_client: MagicMock,
         progress: ProgressTracker,
     ) -> None:
+        # On resume, DriveFile is rebuilt from progress with size=0 (unknown).
+        # Such files must stream (overlapping download+upload, bounded memory)
+        # instead of buffering the whole file in RAM via download_file.
         progress.load("folder-1")
         file = _drive_file("f3", "789.jpg", size=0)
         graphql_client.get_observations_by_sequential_ids.return_value = {
             789: _observation("obs-3", 789)
         }
-        drive_client.download_file.return_value = b"photo bytes"
-        storage_client.upload_file.return_value = (
+        drive_client.open_download_stream.return_value = MagicMock()
+        storage_client.upload_file_stream.return_value = (
             "https://bucket.s3.us-east-1.amazonaws.com/media/obs-3/789.jpg"
         )
         graphql_client.create_media.return_value = _media(
@@ -1986,8 +1977,48 @@ class TestProcessFileStreaming:
 
         asyncio.run(streaming_engine.process_file(file))
 
-        drive_client.download_file.assert_called_once_with("f3")
-        drive_client.open_download_stream.assert_not_called()
+        drive_client.open_download_stream.assert_called_once_with("f3")
+        storage_client.upload_file_stream.assert_called_once()
+        drive_client.download_file.assert_not_called()
+
+
+class TestProcessFilesConcurrency:
+    def test_slow_file_does_not_block_others(
+        self,
+        engine: MigrationEngine,
+        progress: ProgressTracker,
+    ) -> None:
+        # A single stalled file must not block the others: with a worker pool,
+        # the remaining workers keep pulling and processing files while f0 hangs.
+        progress.load("folder-1")
+        files = [_drive_file(f"f{i}", f"{6000 + i}.jpg") for i in range(9)]
+
+        started: list = []
+
+        async def run() -> None:
+            release = asyncio.Event()
+
+            async def fake_process(file: DriveFile, dry_run: bool = False) -> None:
+                started.append(file.id)
+                if file.id == "f0":
+                    await release.wait()
+
+            engine.process_file = fake_process  # type: ignore[method-assign]
+
+            task = asyncio.create_task(engine._process_files(files, dry_run=True))
+            for _ in range(100):
+                await asyncio.sleep(0)
+            await asyncio.sleep(0.05)
+
+            assert "f8" in started, (
+                f"f8 was never processed while f0 stalled; a single slow file "
+                f"blocked the rest. started={started}"
+            )
+
+            release.set()
+            await task
+
+        asyncio.run(run())
 
 
 class TestSessionCleanup:

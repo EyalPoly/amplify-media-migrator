@@ -63,9 +63,15 @@ class TestInit:
 
 
 class TestConnect:
+    @patch("amplify_media_migrator.sources.google_drive.httplib2.Http")
+    @patch("amplify_media_migrator.sources.google_drive.AuthorizedHttp")
     @patch("amplify_media_migrator.sources.google_drive.build")
     def test_builds_service(
-        self, mock_build: MagicMock, client: GoogleDriveClient
+        self,
+        mock_build: MagicMock,
+        mock_authed_http: MagicMock,
+        mock_http: MagicMock,
+        client: GoogleDriveClient,
     ) -> None:
         mock_service = MagicMock()
         mock_build.return_value = mock_service
@@ -74,8 +80,12 @@ class TestConnect:
         # Service is built lazily on first _ensure_connected call
         service = client._ensure_connected()
 
+        mock_http.assert_called_once_with(timeout=client._timeout_seconds)
+        mock_authed_http.assert_called_once_with(
+            client._credentials, http=mock_http.return_value
+        )
         mock_build.assert_called_once_with(
-            "drive", "v3", credentials=client._credentials
+            "drive", "v3", http=mock_authed_http.return_value
         )
         assert service is mock_service
 
