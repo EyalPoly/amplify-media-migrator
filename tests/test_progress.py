@@ -260,6 +260,51 @@ class TestFullFieldSerialization:
         assert f1.error is None
         assert f1.updated_at is not None
 
+    def test_size_roundtrip(self, tracker: ProgressTracker) -> None:
+        tracker.load("folder1")
+        tracker.update_file(
+            "f1",
+            "6602.jpg",
+            FileStatus.PENDING,
+            size=15 * 1024 * 1024,
+        )
+        tracker.save()
+
+        tracker2 = ProgressTracker(progress_dir=tracker._progress_dir)
+        tracker2.load("folder1")
+        f1 = tracker2.get_file("f1")
+        assert f1 is not None
+        assert f1.size == 15 * 1024 * 1024
+
+    def test_size_defaults_to_zero_for_old_progress_files(
+        self, tracker: ProgressTracker, tmp_path: object
+    ) -> None:
+        tracker.load("folder1")
+        path = tracker.progress_path
+        assert path is not None
+        path.write_text(
+            json.dumps(
+                {
+                    "folder_id": "folder1",
+                    "started_at": "2026-01-01T00:00:00+00:00",
+                    "updated_at": "2026-01-01T00:00:00+00:00",
+                    "total_files": 1,
+                    "files": {
+                        "f1": {
+                            "filename": "6602.jpg",
+                            "status": "pending",
+                        }
+                    },
+                }
+            )
+        )
+
+        tracker2 = ProgressTracker(progress_dir=tracker._progress_dir)
+        tracker2.load("folder1")
+        f1 = tracker2.get_file("f1")
+        assert f1 is not None
+        assert f1.size == 0
+
     def test_error_field_roundtrip(self, tracker: ProgressTracker) -> None:
         tracker.load("folder1")
         tracker.update_file(

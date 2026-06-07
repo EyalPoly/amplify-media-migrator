@@ -1,3 +1,4 @@
+import io
 import logging
 from pathlib import Path
 from typing import Any, Callable, NoReturn, Optional
@@ -98,14 +99,16 @@ class AmplifyStorageClient:
         data: bytes,
         key: str,
         content_type: str,
+        on_bytes: Optional[Callable[[int], None]] = None,
     ) -> str:
         s3 = self._ensure_connected()
         try:
-            s3.put_object(
-                Bucket=self._bucket,
-                Key=key,
-                Body=data,
-                ContentType=content_type,
+            s3.upload_fileobj(
+                io.BytesIO(data),
+                self._bucket,
+                key,
+                ExtraArgs={"ContentType": content_type},
+                Callback=on_bytes,
             )
         except ClientError as e:
             self._handle_client_error(e, key=key, bucket=self._bucket)
@@ -120,6 +123,7 @@ class AmplifyStorageClient:
         key: str,
         content_type: str,
         chunk_size_mb: int = 8,
+        on_bytes: Optional[Callable[[int], None]] = None,
     ) -> str:
         s3 = self._ensure_connected()
         config = TransferConfig(
@@ -133,6 +137,7 @@ class AmplifyStorageClient:
                 key,
                 ExtraArgs={"ContentType": content_type},
                 Config=config,
+                Callback=on_bytes,
             )
         except ClientError as e:
             self._handle_client_error(e, key=key, bucket=self._bucket)

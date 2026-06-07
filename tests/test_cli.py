@@ -389,30 +389,7 @@ class TestCreateEngine:
 
 
 class TestRunWithProgress:
-    def test_runs_coroutine_without_tqdm(self) -> None:
-        called = False
-
-        async def coro() -> None:
-            nonlocal called
-            called = True
-
-        mock_engine = MagicMock(spec=MigrationEngine)
-
-        import builtins
-
-        real_import = builtins.__import__
-
-        def mock_import(name: str, *args: object, **kwargs: object) -> object:
-            if name == "tqdm":
-                raise ImportError("no tqdm")
-            return real_import(name, *args, **kwargs)
-
-        with patch.object(builtins, "__import__", side_effect=mock_import):
-            _run_with_progress(coro, mock_engine)
-
-        assert called
-
-    def test_runs_with_tqdm(self) -> None:
+    def test_runs_coroutine(self) -> None:
         called = False
 
         async def coro() -> None:
@@ -424,89 +401,36 @@ class TestRunWithProgress:
         _run_with_progress(coro, mock_engine, desc="Testing")
 
         assert called
-        mock_engine.set_progress_callback.assert_called_once()
 
-    def test_tqdm_progress_callback_updates_bar(self) -> None:
-        captured_callback = None
-
-        async def coro() -> None:
-            pass
-
-        mock_engine = MagicMock(spec=MigrationEngine)
-
-        def capture_callback(cb: object) -> None:
-            nonlocal captured_callback
-            captured_callback = cb
-
-        mock_engine.set_progress_callback.side_effect = capture_callback
-
-        _run_with_progress(coro, mock_engine, desc="Test")
-
-        assert captured_callback is not None
-        captured_callback("6602.jpg", FileStatus.COMPLETED)
-
-    def test_registers_total_and_file_started_callbacks(self) -> None:
+    def test_registers_reporter(self) -> None:
         async def coro() -> None:
             pass
 
         mock_engine = MagicMock(spec=MigrationEngine)
         _run_with_progress(coro, mock_engine)
 
-        mock_engine.set_total_callback.assert_called_once()
-        mock_engine.set_file_started_callback.assert_called_once()
+        mock_engine.set_reporter.assert_called_once()
+        from amplify_media_migrator.cli_progress import LiveReporter
 
-    def test_total_callback_invocable_without_error(self) -> None:
-        """Total callback can be called after _run_with_progress sets it up."""
-        captured_total_cb = None
+        reporter = mock_engine.set_reporter.call_args[0][0]
+        assert isinstance(reporter, LiveReporter)
 
-        async def coro() -> None:
-            pass
-
-        mock_engine = MagicMock(spec=MigrationEngine)
-
-        def capture_total(cb: object) -> None:
-            nonlocal captured_total_cb
-            captured_total_cb = cb
-
-        mock_engine.set_total_callback.side_effect = capture_total
-        _run_with_progress(coro, mock_engine)
-
-        assert captured_total_cb is not None
-        # Should not raise
-        captured_total_cb(100)
-
-    def test_callbacks_do_not_raise_on_typical_sequence(self) -> None:
-        """started → progress callbacks fire without errors for mixed statuses."""
-        captured_started_cb = None
-        captured_progress_cb = None
+    def test_non_tty_uses_plain_path(self) -> None:
+        """A piped (non-terminal) console takes the plain-line path, not rich.Live."""
 
         async def coro() -> None:
             pass
 
         mock_engine = MagicMock(spec=MigrationEngine)
 
-        def capture_started(cb: object) -> None:
-            nonlocal captured_started_cb
-            captured_started_cb = cb
+        with patch("amplify_media_migrator.cli._run_live") as mock_live, patch(
+            "amplify_media_migrator.cli._run_plain"
+        ) as mock_plain:
+            # CliRunner / captured output makes the console non-interactive.
+            _run_with_progress(coro, mock_engine)
 
-        def capture_progress(cb: object) -> None:
-            nonlocal captured_progress_cb
-            captured_progress_cb = cb
-
-        mock_engine.set_file_started_callback.side_effect = capture_started
-        mock_engine.set_progress_callback.side_effect = capture_progress
-
-        _run_with_progress(coro, mock_engine)
-
-        assert captured_started_cb is not None
-        assert captured_progress_cb is not None
-
-        # Simulate a typical sequence: start, then finish with various statuses
-        for filename in ("6602.jpg", "9999.jpg", "bad.txt"):
-            captured_started_cb(filename)
-        captured_progress_cb("6602.jpg", FileStatus.COMPLETED)
-        captured_progress_cb("9999.jpg", FileStatus.ORPHAN)
-        captured_progress_cb("bad.txt", FileStatus.NEEDS_REVIEW)
+        mock_live.assert_not_called()
+        mock_plain.assert_called_once()
 
 
 class TestPrintSummary:

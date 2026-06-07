@@ -1,6 +1,6 @@
 import asyncio
 from typing import Dict, List, Optional
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -212,9 +212,9 @@ class TestProcessFileSingle:
 
         asyncio.run(engine.process_file(file))
 
-        drive_client.download_file.assert_called_once_with("f1")
+        drive_client.download_file.assert_called_once_with("f1", ANY)
         storage_client.upload_file.assert_called_once_with(
-            b"photo bytes", "media/obs-1/6602.jpg", "image/jpeg"
+            b"photo bytes", "media/obs-1/6602.jpg", "image/jpeg", ANY
         )
         graphql_client.create_media.assert_called_once_with(
             "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/6602.jpg",
@@ -286,7 +286,7 @@ class TestProcessFileMultiple:
         asyncio.run(engine.process_file(file))
 
         storage_client.upload_file.assert_called_once_with(
-            b"photo bytes", "media/obs-1/6602a.jpg", "image/jpeg"
+            b"photo bytes", "media/obs-1/6602a.jpg", "image/jpeg", ANY
         )
         assert progress.files["f1"].status == FileStatus.COMPLETED
 
@@ -1336,8 +1336,28 @@ class TestRunWorkers:
         assert len(processed) < len(files)
 
 
-class TestProgressCallback:
-    def test_callback_called_on_completion(
+class FakeReporter:
+    def __init__(self) -> None:
+        self.events: List[tuple] = []
+
+    def on_total(self, total_files: int, total_bytes: int) -> None:
+        self.events.append(("total", total_files, total_bytes))
+
+    def on_file_start(self, file_id: str, name: str, size: int, phase: str) -> None:
+        self.events.append(("start", file_id, name, size, phase))
+
+    def on_file_bytes(self, file_id: str, bytes_done: int) -> None:
+        self.events.append(("bytes", file_id, bytes_done))
+
+    def on_file_phase(self, file_id: str, phase: str) -> None:
+        self.events.append(("phase", file_id, phase))
+
+    def on_file_done(self, file_id: str, status: FileStatus) -> None:
+        self.events.append(("done", file_id, status))
+
+
+class TestProgressReporter:
+    def test_done_emitted_on_completion(
         self,
         engine: MigrationEngine,
         drive_client: MagicMock,
@@ -1346,8 +1366,8 @@ class TestProgressCallback:
         progress: ProgressTracker,
     ) -> None:
         progress.load("folder-1")
-        callback = MagicMock()
-        engine.set_progress_callback(callback)
+        reporter = FakeReporter()
+        engine.set_reporter(reporter)
 
         file = _drive_file("f1", "6602.jpg")
         obs = _observation("obs-1", 6602)
@@ -1358,26 +1378,59 @@ class TestProgressCallback:
 
         asyncio.run(engine.process_file(file))
 
-        callback.assert_called_once_with("6602.jpg", FileStatus.COMPLETED)
+        assert ("done", "f1", FileStatus.COMPLETED) in reporter.events
 
-    def test_callback_called_on_orphan(
+    def test_phase_sequence_for_in_memory_path(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        reporter = FakeReporter()
+        engine.set_reporter(reporter)
+
+        file = _drive_file("f1", "6602.jpg")
+        obs = _observation("obs-1", 6602)
+        graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
+        drive_client.download_file.return_value = b"data"
+        storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
+        graphql_client.create_media.return_value = _media("m-1")
+
+        asyncio.run(engine.process_file(file))
+
+        kinds = [
+            (e[0], e[-1]) for e in reporter.events if e[0] in ("start", "phase", "done")
+        ]
+        assert kinds == [
+            ("start", "querying"),
+            ("phase", "downloading"),
+            ("phase", "uploading"),
+            ("phase", "linking"),
+            ("done", FileStatus.COMPLETED),
+        ]
+
+    def test_done_emitted_on_orphan(
         self,
         engine: MigrationEngine,
         graphql_client: MagicMock,
         progress: ProgressTracker,
     ) -> None:
         progress.load("folder-1")
-        callback = MagicMock()
-        engine.set_progress_callback(callback)
+        reporter = FakeReporter()
+        engine.set_reporter(reporter)
 
         file = _drive_file("f1", "99999.jpg")
         graphql_client.get_observations_by_sequential_ids.return_value = {}
 
         asyncio.run(engine.process_file(file))
 
-        callback.assert_called_once_with("99999.jpg", FileStatus.ORPHAN)
+        assert ("start", "f1", "99999.jpg", file.size, "querying") in reporter.events
+        assert ("done", "f1", FileStatus.ORPHAN) in reporter.events
 
-    def test_file_started_callback_called_before_completion(
+    def test_start_before_done(
         self,
         engine: MigrationEngine,
         drive_client: MagicMock,
@@ -1386,13 +1439,8 @@ class TestProgressCallback:
         progress: ProgressTracker,
     ) -> None:
         progress.load("folder-1")
-        call_order: list = []
-        engine.set_file_started_callback(
-            lambda name: call_order.append(("started", name))
-        )
-        engine.set_progress_callback(
-            lambda name, status: call_order.append(("done", name, status))
-        )
+        reporter = FakeReporter()
+        engine.set_reporter(reporter)
 
         file = _drive_file("f1", "6602.jpg")
         obs = _observation("obs-1", 6602)
@@ -1403,10 +1451,42 @@ class TestProgressCallback:
 
         asyncio.run(engine.process_file(file))
 
-        assert call_order[0] == ("started", "6602.jpg")
-        assert call_order[1] == ("done", "6602.jpg", FileStatus.COMPLETED)
+        assert reporter.events[0] == ("start", "f1", "6602.jpg", file.size, "querying")
+        assert reporter.events[-1] == ("done", "f1", FileStatus.COMPLETED)
 
-    def test_total_callback_called_on_migrate(
+    def test_bytes_forwarded_during_transfer(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        reporter = FakeReporter()
+        engine.set_reporter(reporter)
+
+        file = _drive_file("f1", "6602.jpg")
+        obs = _observation("obs-1", 6602)
+        graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
+
+        def _download(file_id: str, on_bytes: object = None) -> bytes:
+            if on_bytes is not None:
+                on_bytes(5)
+                on_bytes(10)
+            return b"data"
+
+        drive_client.download_file.side_effect = _download
+        storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
+        graphql_client.create_media.return_value = _media("m-1")
+
+        asyncio.run(engine.process_file(file))
+
+        byte_events = [e for e in reporter.events if e[0] == "bytes"]
+        assert ("bytes", "f1", 5) in byte_events
+        assert ("bytes", "f1", 10) in byte_events
+
+    def test_on_total_emitted_on_migrate(
         self,
         engine: MigrationEngine,
         drive_client: MagicMock,
@@ -1414,19 +1494,19 @@ class TestProgressCallback:
         progress: ProgressTracker,
     ) -> None:
         drive_client.list_files.return_value = [
-            _drive_file("f1", "6602.jpg"),
-            _drive_file("f2", "6603.jpg"),
+            _drive_file("f1", "6602.jpg", size=100),
+            _drive_file("f2", "6603.jpg", size=200),
         ]
         graphql_client.get_observations_by_sequential_ids.return_value = {}
 
-        totals: list = []
-        engine.set_total_callback(totals.append)
+        reporter = FakeReporter()
+        engine.set_reporter(reporter)
 
         asyncio.run(engine.migrate("folder-1"))
 
-        assert totals == [2]
+        assert ("total", 2, 300) in reporter.events
 
-    def test_total_callback_not_called_when_no_callback_set(
+    def test_null_reporter_default_does_not_raise(
         self,
         engine: MigrationEngine,
         drive_client: MagicMock,
@@ -1434,10 +1514,9 @@ class TestProgressCallback:
     ) -> None:
         drive_client.list_files.return_value = [_drive_file("f1", "6602.jpg")]
         graphql_client.get_observations_by_sequential_ids.return_value = {}
-        # Should not raise even without a total callback set
         asyncio.run(engine.migrate("folder-1"))
 
-    def test_file_started_callback_called_for_each_file(
+    def test_start_emitted_for_each_file(
         self,
         engine: MigrationEngine,
         drive_client: MagicMock,
@@ -1450,12 +1529,13 @@ class TestProgressCallback:
         ]
         graphql_client.get_observations_by_sequential_ids.return_value = {}
 
-        started: list = []
-        engine.set_file_started_callback(started.append)
+        reporter = FakeReporter()
+        engine.set_reporter(reporter)
 
         asyncio.run(engine.migrate("folder-1"))
 
-        assert sorted(started) == ["6602.jpg", "6603.jpg"]
+        started = sorted(e[2] for e in reporter.events if e[0] == "start")
+        assert started == ["6602.jpg", "6603.jpg"]
 
 
 class TestEdgeCases:
@@ -1908,7 +1988,7 @@ class TestProcessFileStreaming:
 
         asyncio.run(streaming_engine.process_file(file))
 
-        drive_client.download_file.assert_called_once_with("f1")
+        drive_client.download_file.assert_called_once_with("f1", ANY)
         drive_client.open_download_stream.assert_not_called()
         storage_client.upload_file_stream.assert_not_called()
 
