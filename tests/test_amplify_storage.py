@@ -203,20 +203,35 @@ class TestUploadFile:
             content_type="image/jpeg",
         )
 
-        mock_s3.put_object.assert_called_once_with(
-            Bucket=BUCKET,
-            Key="media/obs-1/photo.jpg",
-            Body=b"photo bytes",
-            ContentType="image/jpeg",
-        )
+        mock_s3.upload_fileobj.assert_called_once()
+        call_args = mock_s3.upload_fileobj.call_args
+        assert call_args[0][0].read() == b"photo bytes"
+        assert call_args[0][1] == BUCKET
+        assert call_args[0][2] == "media/obs-1/photo.jpg"
+        assert call_args[1]["ExtraArgs"] == {"ContentType": "image/jpeg"}
+        assert call_args[1]["Callback"] is None
         assert (
             url == f"https://{BUCKET}.s3.{REGION}.amazonaws.com/media/obs-1/photo.jpg"
         )
 
+    def test_passes_on_bytes_callback(
+        self, connected_client: AmplifyStorageClient, mock_s3: MagicMock
+    ) -> None:
+        callback = MagicMock()
+
+        connected_client.upload_file(
+            data=b"data",
+            key="media/obs-1/photo.jpg",
+            content_type="image/jpeg",
+            on_bytes=callback,
+        )
+
+        assert mock_s3.upload_fileobj.call_args[1]["Callback"] is callback
+
     def test_client_error_raises_upload_error(
         self, connected_client: AmplifyStorageClient, mock_s3: MagicMock
     ) -> None:
-        mock_s3.put_object.side_effect = _make_client_error("InternalError")
+        mock_s3.upload_fileobj.side_effect = _make_client_error("InternalError")
 
         with pytest.raises(UploadError):
             connected_client.upload_file(
@@ -391,6 +406,19 @@ class TestUploadFileStream:
         assert call_args[0][2] == "media/obs/file.jpg"
         assert call_args[1]["ExtraArgs"] == {"ContentType": "image/jpeg"}
         assert url == f"https://{BUCKET}.s3.{REGION}.amazonaws.com/media/obs/file.jpg"
+
+    def test_passes_on_bytes_callback(
+        self, connected_client: AmplifyStorageClient, mock_s3: MagicMock
+    ) -> None:
+        s = _QueueStream()
+        s.close_write()
+        callback = MagicMock()
+
+        connected_client.upload_file_stream(
+            s, "media/obs/file.jpg", "image/jpeg", on_bytes=callback
+        )
+
+        assert mock_s3.upload_fileobj.call_args[1]["Callback"] is callback
 
     def test_s3_error_raises_upload_error(
         self, connected_client: AmplifyStorageClient, mock_s3: MagicMock

@@ -30,6 +30,7 @@ class FileProgress:
     media_ids: List[str] = field(default_factory=list)
     error: Optional[str] = None
     updated_at: Optional[datetime] = None
+    size: int = 0
 
 
 @dataclass
@@ -57,6 +58,7 @@ def _file_progress_to_dict(fp: FileProgress) -> Dict[str, Any]:
         "media_ids": fp.media_ids,
         "error": fp.error,
         "updated_at": fp.updated_at.isoformat() if fp.updated_at else None,
+        "size": fp.size,
     }
 
 
@@ -73,6 +75,7 @@ def _file_progress_from_dict(data: Dict[str, Any]) -> FileProgress:
         media_ids=data.get("media_ids", []),
         error=data.get("error"),
         updated_at=updated_at,
+        size=data.get("size", 0),
     )
 
 
@@ -177,6 +180,7 @@ class ProgressTracker:
         s3_url: Optional[str] = None,
         media_ids: Optional[List[str]] = None,
         error: Optional[str] = None,
+        size: Optional[int] = None,
     ) -> None:
         existing = self._files.get(file_id)
         if existing:
@@ -189,6 +193,8 @@ class ProgressTracker:
                 existing.s3_url = s3_url
             if media_ids is not None:
                 existing.media_ids = media_ids
+            if size is not None:
+                existing.size = size
             existing.error = error
             existing.updated_at = datetime.now(timezone.utc)
         else:
@@ -201,6 +207,7 @@ class ProgressTracker:
                 media_ids=media_ids or [],
                 error=error,
                 updated_at=datetime.now(timezone.utc),
+                size=size or 0,
             )
 
     def get_file(self, file_id: str) -> Optional[FileProgress]:

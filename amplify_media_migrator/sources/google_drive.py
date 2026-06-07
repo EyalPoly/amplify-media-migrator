@@ -3,7 +3,7 @@ import logging
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Iterator, NoReturn, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, NoReturn, Optional
 
 import httplib2
 from google_auth_httplib2 import AuthorizedHttp
@@ -146,7 +146,9 @@ class GoogleDriveClient:
             if not page_token:
                 break
 
-    def download_file(self, file_id: str) -> bytes:
+    def download_file(
+        self, file_id: str, on_bytes: Optional[Callable[[int], None]] = None
+    ) -> bytes:
         service = self._ensure_connected()
         self._rate_limiter.acquire()
         try:
@@ -156,7 +158,9 @@ class GoogleDriveClient:
 
             done = False
             while not done:
-                _, done = downloader.next_chunk()
+                status, done = downloader.next_chunk()
+                if on_bytes is not None and status is not None:
+                    on_bytes(status.resumable_progress)
 
             return buffer.getvalue()
         except HttpError as e:

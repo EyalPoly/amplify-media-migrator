@@ -3,18 +3,19 @@ import json
 import logging
 import threading
 import time
-from collections import defaultdict
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, List, Optional
 
 import click
 
 from .auth.google_drive import GoogleDriveAuthProvider
 from .auth.token_manager import CognitoTokenManager
+from .cli_progress import LiveReporter
 from .config import ConfigManager, ConfigurationError, config_to_dict
 from .migration.engine import MigrationEngine
 from .migration.mapper import FilenameMapper
 from .migration.progress import FileStatus, ProgressTracker
+from .utils.logger import DEFAULT_LOG_FORMAT
 from .sources.google_drive import GoogleDriveClient
 from .targets.amplify_storage import AmplifyStorageClient
 from .targets.graphql_client import GraphQLClient
@@ -216,80 +217,112 @@ def _create_engine(
     )
 
 
+class _LiveLogHandler(logging.Handler):
+    """Routes WARNING+ log records above the live region via the rich console."""
+
+    def __init__(self, live: Any) -> None:
+        super().__init__(level=logging.WARNING)
+        self._live = live
+        self.setFormatter(logging.Formatter(DEFAULT_LOG_FORMAT))
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self._live.console.print(self.format(record))
+        except Exception:
+            self.handleError(record)
+
+
+def _quiet_stream_handlers(logger: logging.Logger) -> List[logging.Handler]:
+    """Silence stderr stream handlers during a live render; return them to restore."""
+    muted: List[logging.Handler] = []
+    for handler in logger.handlers:
+        if isinstance(handler, logging.StreamHandler) and not isinstance(
+            handler, logging.FileHandler
+        ):
+            handler.setLevel(logging.CRITICAL + 1)
+            muted.append(handler)
+    return muted
+
+
 def _run_with_progress(
     coro_fn: Callable[[], Any],
     engine: MigrationEngine,
     desc: str = "Processing",
 ) -> None:
-    try:
-        from tqdm import tqdm
+    from rich.console import Console
 
-        counts: dict = defaultdict(int)
-        active_files: list = []
-        lock = threading.Lock()
+    console = Console(stderr=True)
+    reporter = LiveReporter()
+    engine.set_reporter(reporter)
 
-        progress_bar = tqdm(desc=desc, unit=" file", dynamic_ncols=True)
+    if console.is_terminal:
+        _run_live(coro_fn, reporter, console)
+    else:
+        _run_plain(coro_fn, reporter, console)
 
-        def _refresh_postfix() -> None:
-            with lock:
-                parts = []
-                if counts["completed"]:
-                    parts.append(f"ok={counts['completed']}")
-                if counts["failed"]:
-                    parts.append(f"fail={counts['failed']}")
-                if counts["orphan"]:
-                    parts.append(f"orphan={counts['orphan']}")
-                if counts["needs_review"]:
-                    parts.append(f"review={counts['needs_review']}")
-                if active_files:
-                    suffix = (
-                        f" (+{len(active_files) - 1} more)"
-                        if len(active_files) > 1
-                        else ""
-                    )
-                    parts.append(f"↓ {active_files[-1]}{suffix}")
-                progress_bar.set_postfix_str("  ".join(parts) if parts else "")
 
-        def on_total(total: int) -> None:
-            progress_bar.total = total
-            progress_bar.refresh()
+def _run_live(
+    coro_fn: Callable[[], Any],
+    reporter: LiveReporter,
+    console: Any,
+    fps: int = 6,
+) -> None:
+    from rich.live import Live
 
-        def on_file_started(filename: str) -> None:
-            with lock:
-                active_files.append(filename)
-            _refresh_postfix()
+    app_logger = logging.getLogger("amplify_media_migrator")
+    stop = threading.Event()
 
-        def on_progress(filename: str, status: FileStatus) -> None:
-            with lock:
-                if filename in active_files:
-                    active_files.remove(filename)
-                counts[status.value] += 1
-            progress_bar.update(1)
-            _refresh_postfix()
-
-        engine.set_total_callback(on_total)
-        engine.set_file_started_callback(on_file_started)
-        engine.set_progress_callback(on_progress)
-
-        stop_refresh = threading.Event()
+    with Live(reporter.render(), console=console, refresh_per_second=fps) as live:
+        muted = _quiet_stream_handlers(app_logger)
+        log_handler = _LiveLogHandler(live)
+        app_logger.addHandler(log_handler)
 
         def _ticker() -> None:
-            while not stop_refresh.is_set():
-                time.sleep(1)
-                _refresh_postfix()
-                progress_bar.refresh()
+            while not stop.wait(1.0 / fps):
+                reporter.sample()
+                live.update(reporter.render())
 
-        refresh_thread = threading.Thread(target=_ticker, daemon=True)
-        refresh_thread.start()
-
+        thread = threading.Thread(target=_ticker, daemon=True)
+        thread.start()
         try:
             asyncio.run(coro_fn())
         finally:
-            stop_refresh.set()
-            progress_bar.close()
+            stop.set()
+            thread.join(timeout=2)
+            reporter.sample()
+            live.update(reporter.render())
+            app_logger.removeHandler(log_handler)
+            for handler in muted:
+                handler.setLevel(logging.NOTSET)
 
-    except ImportError:
+
+def _run_plain(
+    coro_fn: Callable[[], Any],
+    reporter: LiveReporter,
+    console: Any,
+    interval: float = 30.0,
+    clock: Callable[[], float] = time.monotonic,
+) -> None:
+    stop = threading.Event()
+    last = clock()
+
+    def _ticker() -> None:
+        nonlocal last
+        while not stop.wait(1.0):
+            reporter.sample()
+            now = clock()
+            if now - last >= interval:
+                last = now
+                console.print(reporter.plain_line())
+
+    thread = threading.Thread(target=_ticker, daemon=True)
+    thread.start()
+    try:
         asyncio.run(coro_fn())
+    finally:
+        stop.set()
+        thread.join(timeout=2)
+        console.print(reporter.plain_line())
 
 
 def _print_summary(summary: dict) -> None:

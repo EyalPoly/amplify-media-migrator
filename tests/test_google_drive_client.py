@@ -298,6 +298,25 @@ class TestDownloadFile:
             fileId="file1", supportsAllDrives=True
         )
 
+    @patch("amplify_media_migrator.sources.google_drive.MediaIoBaseDownload")
+    def test_on_bytes_receives_cumulative_progress(
+        self,
+        mock_download_cls: MagicMock,
+        connected_client: GoogleDriveClient,
+        mock_service: MagicMock,
+    ) -> None:
+        mock_downloader = MagicMock()
+        mock_downloader.next_chunk.side_effect = [
+            (MagicMock(resumable_progress=100), False),
+            (MagicMock(resumable_progress=250), True),
+        ]
+        mock_download_cls.return_value = mock_downloader
+
+        seen: list = []
+        connected_client.download_file("file1", on_bytes=seen.append)
+
+        assert seen == [100, 250]
+
     def test_404_raises_download_error(
         self, connected_client: GoogleDriveClient, mock_service: MagicMock
     ) -> None:

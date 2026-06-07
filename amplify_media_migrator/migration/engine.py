@@ -18,6 +18,7 @@ from ..utils.exceptions import (
 from ..utils.media import get_content_type, get_media_type
 from .mapper import FilenameMapper, FilenamePattern, ParsedFilename
 from .progress import FileStatus, ProgressTracker
+from .reporter import NullReporter, ProgressReporter
 
 logger = logging.getLogger(__name__)
 
@@ -51,20 +52,10 @@ class MigrationEngine:
         self._token_manager = token_manager
         self._initial_id_token = initial_id_token
         self._uploaded_urls: set[str] = set()
-        self._on_progress: Optional[Callable[[str, FileStatus], None]] = None
-        self._on_total_known: Optional[Callable[[int], None]] = None
-        self._on_file_started: Optional[Callable[[str], None]] = None
+        self._reporter: ProgressReporter = NullReporter()
 
-    def set_progress_callback(
-        self, callback: Callable[[str, FileStatus], None]
-    ) -> None:
-        self._on_progress = callback
-
-    def set_total_callback(self, callback: Callable[[int], None]) -> None:
-        self._on_total_known = callback
-
-    def set_file_started_callback(self, callback: Callable[[str], None]) -> None:
-        self._on_file_started = callback
+    def set_reporter(self, reporter: ProgressReporter) -> None:
+        self._reporter = reporter
 
     def _populate_url_cache(self) -> None:
         self._uploaded_urls = {
@@ -108,6 +99,7 @@ class MigrationEngine:
                     filename=drive_file.name,
                     status=FileStatus.NEEDS_REVIEW,
                     error=parsed.error,
+                    size=drive_file.size,
                 )
             else:
                 self._progress.update_file(
@@ -115,6 +107,7 @@ class MigrationEngine:
                     filename=drive_file.name,
                     status=FileStatus.PENDING,
                     sequential_ids=parsed.sequential_ids,
+                    size=drive_file.size,
                 )
 
         self._progress.save()
@@ -141,8 +134,8 @@ class MigrationEngine:
         else:
             files_to_process = await self._build_work_from_progress(retry_orphans)
 
-        if self._on_total_known:
-            self._on_total_known(len(files_to_process))
+        total_bytes = sum(f.size for f in files_to_process)
+        self._reporter.on_total(len(files_to_process), total_bytes)
 
         await self._process_files(files_to_process, dry_run)
 
@@ -185,6 +178,7 @@ class MigrationEngine:
                     filename=drive_file.name,
                     status=FileStatus.NEEDS_REVIEW,
                     error=parsed.error,
+                    size=drive_file.size,
                 )
             else:
                 self._progress.update_file(
@@ -192,6 +186,7 @@ class MigrationEngine:
                     filename=drive_file.name,
                     status=FileStatus.PENDING,
                     sequential_ids=parsed.sequential_ids,
+                    size=drive_file.size,
                 )
 
         self._requeue_as_pending(self._collect_retryable_ids(retry_orphans))
@@ -218,7 +213,7 @@ class MigrationEngine:
                 )
                 continue
             files_to_process.append(
-                DriveFile(id=file_id, name=fp.filename, mime_type="", size=0)
+                DriveFile(id=file_id, name=fp.filename, mime_type="", size=fp.size)
             )
 
         if needs_review_ids:
@@ -324,8 +319,7 @@ class MigrationEngine:
         file: DriveFile,
         dry_run: bool = False,
     ) -> None:
-        if self._on_file_started:
-            self._on_file_started(file.name)
+        self._reporter.on_file_start(file.id, file.name, file.size, "querying")
         parsed = self._mapper.parse(file.name)
 
         if parsed.pattern == FilenamePattern.INVALID:
@@ -335,7 +329,7 @@ class MigrationEngine:
                 status=FileStatus.NEEDS_REVIEW,
                 error=parsed.error,
             )
-            self._notify_progress(file.name, FileStatus.NEEDS_REVIEW)
+            self._reporter.on_file_done(file.id, FileStatus.NEEDS_REVIEW)
             return
 
         try:
@@ -354,7 +348,7 @@ class MigrationEngine:
                 sequential_ids=parsed.sequential_ids,
                 error="No matching observations found",
             )
-            self._notify_progress(file.name, FileStatus.ORPHAN)
+            self._reporter.on_file_done(file.id, FileStatus.ORPHAN)
             return
 
         first_obs = next(iter(observations.values()))
@@ -370,7 +364,7 @@ class MigrationEngine:
                 observation_ids=[obs.id for obs in observations.values()],
                 s3_url=s3_url,
             )
-            self._notify_progress(file.name, FileStatus.COMPLETED)
+            self._reporter.on_file_done(file.id, FileStatus.COMPLETED)
             return
 
         try:
@@ -392,24 +386,28 @@ class MigrationEngine:
                 observation_ids=[obs.id for obs in observations.values()],
                 s3_url=s3_url,
             )
-            self._notify_progress(file.name, FileStatus.COMPLETED)
+            self._reporter.on_file_done(file.id, FileStatus.COMPLETED)
             return
 
         if dry_run:
-            self._notify_progress(file.name, FileStatus.COMPLETED)
+            self._reporter.on_file_done(file.id, FileStatus.COMPLETED)
             return
 
         # If this file was previously uploaded (interrupted after S3 upload but
         # before media record creation), reuse the stored S3 URL and skip
         # the download/upload entirely.
+        def _on_bytes(bytes_done: int) -> None:
+            self._reporter.on_file_bytes(file.id, bytes_done)
+
         stored = self._progress.get_file(file.id)
         if stored and stored.status == FileStatus.UPLOADED and stored.s3_url:
             s3_url = stored.s3_url
         elif file.size == 0 or file.size > self._large_file_threshold_bytes:
+            self._reporter.on_file_phase(file.id, "uploading")
             content_type = get_content_type(parsed.extension)
             try:
                 s3_url = await self._stream_upload_with_retry(
-                    file, s3_key, content_type
+                    file, s3_key, content_type, _on_bytes
                 )
             except AuthenticationError:
                 raise
@@ -425,8 +423,9 @@ class MigrationEngine:
                 s3_url=s3_url,
             )
         else:
+            self._reporter.on_file_phase(file.id, "downloading")
             try:
-                data = await self._download_with_retry(file.id)
+                data = await self._download_with_retry(file.id, _on_bytes)
             except AuthenticationError:
                 raise
             except MigratorError as e:
@@ -440,6 +439,7 @@ class MigrationEngine:
                 sequential_ids=parsed.sequential_ids,
             )
 
+            self._reporter.on_file_phase(file.id, "uploading")
             content_type = get_content_type(parsed.extension)
             try:
                 s3_url = await asyncio.to_thread(
@@ -447,6 +447,7 @@ class MigrationEngine:
                     data,
                     s3_key,
                     content_type,
+                    self._make_cumulative_callback(_on_bytes),
                 )
             except AuthenticationError:
                 raise
@@ -462,6 +463,7 @@ class MigrationEngine:
                 s3_url=s3_url,
             )
 
+        self._reporter.on_file_phase(file.id, "linking")
         media_type = get_media_type(parsed.extension)
         media_ids: List[str] = []
         observation_ids: List[str] = []
@@ -510,14 +512,29 @@ class MigrationEngine:
             media_ids=media_ids,
             error=error,
         )
-        self._notify_progress(file.name, status)
+        self._reporter.on_file_done(file.id, status)
 
-    async def _download_with_retry(self, file_id: str) -> bytes:
+    @staticmethod
+    def _make_cumulative_callback(
+        on_bytes: Callable[[int], None],
+    ) -> Callable[[int], None]:
+        total = 0
+
+        def _cb(delta: int) -> None:
+            nonlocal total
+            total += delta
+            on_bytes(total)
+
+        return _cb
+
+    async def _download_with_retry(
+        self, file_id: str, on_bytes: Optional[Callable[[int], None]] = None
+    ) -> bytes:
         last_error: Optional[MigratorError] = None
         for attempt in range(self._retry_attempts):
             try:
                 data: bytes = await asyncio.to_thread(
-                    self._drive_client.download_file, file_id
+                    self._drive_client.download_file, file_id, on_bytes
                 )
                 return data
             except RateLimitError as e:
@@ -551,17 +568,28 @@ class MigrationEngine:
         )
 
     async def _stream_upload_with_retry(
-        self, file: DriveFile, s3_key: str, content_type: str
+        self,
+        file: DriveFile,
+        s3_key: str,
+        content_type: str,
+        on_bytes: Optional[Callable[[int], None]] = None,
     ) -> str:
         last_error: Optional[MigratorError] = None
         for attempt in range(self._retry_attempts):
             stream = self._drive_client.open_download_stream(file.id)
+            callback = (
+                self._make_cumulative_callback(on_bytes)
+                if on_bytes is not None
+                else None
+            )
             try:
                 s3_url: str = await asyncio.to_thread(
                     self._storage_client.upload_file_stream,
                     stream,
                     s3_key,
                     content_type,
+                    8,
+                    callback,
                 )
                 return s3_url
             except AuthenticationError:
@@ -606,11 +634,7 @@ class MigrationEngine:
             sequential_ids=parsed.sequential_ids,
             error=error,
         )
-        self._notify_progress(file.name, FileStatus.FAILED)
-
-    def _notify_progress(self, filename: str, status: FileStatus) -> None:
-        if self._on_progress:
-            self._on_progress(filename, status)
+        self._reporter.on_file_done(file.id, FileStatus.FAILED)
 
     def get_summary(self) -> Dict[str, int]:
         summary = self._progress.get_summary()
