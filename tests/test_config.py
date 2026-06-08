@@ -49,6 +49,11 @@ def sample_config_dict():
             "chunk_size_mb": 16,
             "default_media_public": True,
         },
+        "prefix_disambiguation": {
+            "enabled": False,
+            "discriminator_field": "",
+            "prefixes": {},
+        },
     }
 
 
@@ -475,3 +480,58 @@ class TestConfigManagerProperties:
         config = mgr.config
         assert isinstance(config, Config)
         assert config.migration.concurrency == 100
+
+
+def test_prefix_disambiguation_round_trip():
+    from amplify_media_migrator.config import config_from_dict, config_to_dict
+
+    data = {
+        "prefix_disambiguation": {
+            "enabled": True,
+            "discriminator_field": "countryId",
+            "prefixes": {"": "c-med", "E": "c-red", "S": "*"},
+        }
+    }
+    cfg = config_from_dict(data)
+    assert cfg.prefix_disambiguation.enabled is True
+    assert cfg.prefix_disambiguation.discriminator_field == "countryId"
+    assert cfg.prefix_disambiguation.prefixes["S"] == "*"
+    assert config_to_dict(cfg)["prefix_disambiguation"]["prefixes"][""] == "c-med"
+
+
+def test_prefix_disambiguation_defaults_disabled():
+    from amplify_media_migrator.config import config_from_dict
+
+    cfg = config_from_dict({})
+    assert cfg.prefix_disambiguation.enabled is False
+    assert cfg.prefix_disambiguation.prefixes == {}
+
+
+def test_prefix_disambiguation_validation_requires_fields():
+    from amplify_media_migrator.config import (
+        Config,
+        PrefixDisambiguationConfig,
+        ConfigurationError,
+    )
+
+    cfg = Config()
+    cfg.prefix_disambiguation = PrefixDisambiguationConfig(
+        enabled=True, discriminator_field="", prefixes={}
+    )
+    with pytest.raises(ConfigurationError):
+        cfg.validate()
+
+
+def test_prefix_disambiguation_rejects_multiple_catch_all():
+    from amplify_media_migrator.config import (
+        Config,
+        PrefixDisambiguationConfig,
+        ConfigurationError,
+    )
+
+    cfg = Config()
+    cfg.prefix_disambiguation = PrefixDisambiguationConfig(
+        enabled=True, discriminator_field="countryId", prefixes={"E": "*", "S": "*"}
+    )
+    with pytest.raises(ConfigurationError):
+        cfg.validate()

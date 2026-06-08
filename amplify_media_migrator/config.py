@@ -3,7 +3,7 @@ import logging
 import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 import click
 
@@ -52,10 +52,20 @@ class MigrationConfig:
 
 
 @dataclass
+class PrefixDisambiguationConfig:
+    enabled: bool = False
+    discriminator_field: str = ""
+    prefixes: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
 class Config:
     google_drive: GoogleDriveConfig = field(default_factory=GoogleDriveConfig)
     aws: AWSConfig = field(default_factory=AWSConfig)
     migration: MigrationConfig = field(default_factory=MigrationConfig)
+    prefix_disambiguation: PrefixDisambiguationConfig = field(
+        default_factory=PrefixDisambiguationConfig
+    )
 
     def validate(self) -> None:
         errors: List[str] = []
@@ -67,6 +77,20 @@ class Config:
             errors.append("migration.retry_delay_seconds must be >= 0")
         if self.migration.chunk_size_mb <= 0:
             errors.append("migration.chunk_size_mb must be > 0")
+        pd = self.prefix_disambiguation
+        if pd.enabled:
+            if not pd.discriminator_field:
+                errors.append(
+                    "prefix_disambiguation.discriminator_field is required when enabled"
+                )
+            if not pd.prefixes:
+                errors.append(
+                    "prefix_disambiguation.prefixes must be non-empty when enabled"
+                )
+            if sum(1 for v in pd.prefixes.values() if v == "*") > 1:
+                errors.append(
+                    "prefix_disambiguation.prefixes may contain at most one '*' catch-all"
+                )
         if errors:
             raise ConfigurationError(
                 "Configuration validation failed:\n"
@@ -129,7 +153,19 @@ def config_from_dict(data: dict) -> Config:
         ),
     )
 
-    return Config(google_drive=google_drive, aws=aws, migration=migration)
+    pd_data = data.get("prefix_disambiguation", {})
+    prefix_disambiguation = PrefixDisambiguationConfig(
+        enabled=pd_data.get("enabled", False),
+        discriminator_field=pd_data.get("discriminator_field", ""),
+        prefixes=dict(pd_data.get("prefixes", {})),
+    )
+
+    return Config(
+        google_drive=google_drive,
+        aws=aws,
+        migration=migration,
+        prefix_disambiguation=prefix_disambiguation,
+    )
 
 
 class ConfigManager:
