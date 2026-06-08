@@ -594,3 +594,38 @@ def test_get_session_after_close_creates_new_session(client: GraphQLClient) -> N
 
     assert first is not second
     first.close.assert_called_once_with()
+
+
+class TestDiscriminatorLookup:
+    def test_single_lookup_populates_discriminator_value(self):
+        from amplify_media_migrator.targets.graphql_client import GraphQLClient
+        client = GraphQLClient(api_endpoint="https://x/graphql")
+        client.connect("token")
+        client._execute = lambda *a, **k: {"listObservations": {"items": [
+            {"id": "o1", "sequentialId": 5, "countryId": "c-red"}
+        ], "nextToken": None}}
+        obs = client.get_observation_by_sequential_id(5, discriminator_field="countryId")
+        assert obs is not None
+        assert obs.discriminator_value == "c-red"
+
+    def test_get_all_collects_every_candidate(self):
+        from amplify_media_migrator.targets.graphql_client import GraphQLClient
+        client = GraphQLClient(api_endpoint="https://x/graphql")
+        client.connect("token")
+        pages = [
+            {"listObservations": {"items": [
+                {"id": "o1", "sequentialId": 5, "countryId": "c-med"}], "nextToken": "t"}},
+            {"listObservations": {"items": [
+                {"id": "o2", "sequentialId": 5, "countryId": "c-red"}], "nextToken": None}},
+        ]
+        client._execute = lambda *a, **k: pages.pop(0)
+        result = client.get_all_observations_by_sequential_id(5, discriminator_field="countryId")
+        assert [o.id for o in result] == ["o1", "o2"]
+        assert {o.discriminator_value for o in result} == {"c-med", "c-red"}
+
+    def test_invalid_discriminator_field_rejected(self):
+        from amplify_media_migrator.targets.graphql_client import GraphQLClient
+        client = GraphQLClient(api_endpoint="https://x/graphql")
+        client.connect("token")
+        with pytest.raises(ValueError):
+            client.get_all_observations_by_sequential_id(5, discriminator_field="bad field!")
