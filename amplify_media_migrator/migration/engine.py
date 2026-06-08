@@ -35,6 +35,9 @@ class MigrationEngine:
         retry_attempts: int = 3,
         retry_delay_seconds: int = 5,
         default_media_public: bool = False,
+        disambiguation_enabled: bool = False,
+        discriminator_field: Optional[str] = None,
+        prefix_rules: Optional[Dict[str, str]] = None,
         large_file_threshold_mb: int = 25,
         token_manager: Optional[CognitoTokenManager] = None,
         initial_id_token: Optional[str] = None,
@@ -48,6 +51,9 @@ class MigrationEngine:
         self._retry_attempts = retry_attempts
         self._retry_delay_seconds = retry_delay_seconds
         self._default_media_public = default_media_public
+        self._disambiguation_enabled = disambiguation_enabled
+        self._discriminator_field = discriminator_field
+        self._prefix_rules: Dict[str, str] = prefix_rules or {}
         self._large_file_threshold_bytes: int = large_file_threshold_mb * 1024 * 1024
         self._token_manager = token_manager
         self._initial_id_token = initial_id_token
@@ -296,15 +302,51 @@ class MigrationEngine:
             )
         return None
 
-    async def _lookup_observations(
-        self, sequential_ids: List[int]
-    ) -> Dict[int, Observation]:
-        tasks = [
-            asyncio.to_thread(
-                self._graphql_client.get_observation_by_sequential_id, sid
+    @staticmethod
+    def _select_by_prefix(
+        candidates: List[Observation],
+        prefix: str,
+        prefix_rules: Dict[str, str],
+    ) -> Optional[Observation]:
+        if prefix not in prefix_rules:
+            return None
+        rule = prefix_rules[prefix]
+        if rule == "*":
+            explicit = {v for v in prefix_rules.values() if v != "*"}
+            matches = [o for o in candidates if o.discriminator_value not in explicit]
+        else:
+            matches = [o for o in candidates if o.discriminator_value == rule]
+        if len(matches) > 1:
+            raise MigratorError(
+                f"Ambiguous prefix match: {len(matches)} observations for "
+                f"sequential_id={candidates[0].sequential_id} prefix='{prefix}'"
             )
-            for sid in sequential_ids
-        ]
+        return matches[0] if matches else None
+
+    async def _lookup_observations(
+        self,
+        sequential_ids: List[int],
+        prefix: Optional[str] = None,
+    ) -> Dict[int, Observation]:
+        if self._disambiguation_enabled and prefix is not None:
+
+            async def _lookup(sid: int) -> Optional[Observation]:
+                candidates = await asyncio.to_thread(
+                    self._graphql_client.get_all_observations_by_sequential_id,
+                    sid,
+                    self._discriminator_field,
+                )
+                return self._select_by_prefix(candidates, prefix, self._prefix_rules)
+
+            tasks = [_lookup(sid) for sid in sequential_ids]
+        else:
+            tasks = [
+                asyncio.to_thread(
+                    self._graphql_client.get_observation_by_sequential_id, sid
+                )
+                for sid in sequential_ids
+            ]
+
         results = await asyncio.gather(*tasks, return_exceptions=True)
         observations: Dict[int, Observation] = {}
         for sid, result in zip(sequential_ids, results):
@@ -333,7 +375,9 @@ class MigrationEngine:
             return
 
         try:
-            observations = await self._lookup_observations(parsed.sequential_ids)
+            observations = await self._lookup_observations(
+                parsed.sequential_ids, parsed.prefix
+            )
         except AuthenticationError:
             raise
         except MigratorError as e:
