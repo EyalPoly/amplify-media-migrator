@@ -202,6 +202,8 @@ def _create_engine(
             on_token=_on_new_token,
         )
 
+    pd_cfg = cfg.config.prefix_disambiguation
+
     return MigrationEngine(
         drive_client=drive_client,
         storage_client=storage_client,
@@ -212,6 +214,9 @@ def _create_engine(
         retry_attempts=migration_cfg.retry_attempts,
         retry_delay_seconds=migration_cfg.retry_delay_seconds,
         default_media_public=migration_cfg.default_media_public,
+        disambiguation_enabled=pd_cfg.enabled,
+        discriminator_field=pd_cfg.discriminator_field or None,
+        prefix_rules=dict(pd_cfg.prefixes),
         token_manager=token_manager,
         initial_id_token=id_token,
     )
