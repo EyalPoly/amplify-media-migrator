@@ -18,15 +18,17 @@ class ParsedFilename:
     extension: str
     original_filename: str
     error: Optional[str] = None
+    prefix: str = ""
 
 
 VALID_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "mp4", "mov", "avi", "wmv"}
 
 _EXT = r"(jpg|jpeg|png|gif|mp4|mov|avi|wmv)"
-_SINGLE_RE = re.compile(rf"^(\d+)\.{_EXT}$", re.IGNORECASE)
-_MULTIPLE_RE = re.compile(rf"^(\d+)[a-zA-Z]\.{_EXT}$", re.IGNORECASE)
-_MULTIPLE_HYPHEN_RE = re.compile(rf"^(\d+)-[a-zA-Z]\.{_EXT}$", re.IGNORECASE)
-_RANGE_RE = re.compile(rf"^(\d+)-(\d+)\.{_EXT}$", re.IGNORECASE)
+_PREFIX = r"([A-Za-z]?)"
+_SINGLE_RE = re.compile(rf"^{_PREFIX}(\d+)\.{_EXT}$", re.IGNORECASE)
+_MULTIPLE_RE = re.compile(rf"^{_PREFIX}(\d+)[a-zA-Z]\.{_EXT}$", re.IGNORECASE)
+_MULTIPLE_HYPHEN_RE = re.compile(rf"^{_PREFIX}(\d+)-[a-zA-Z]\.{_EXT}$", re.IGNORECASE)
+_RANGE_RE = re.compile(rf"^{_PREFIX}(\d+)-(\d+)\.{_EXT}$", re.IGNORECASE)
 
 
 class FilenameMapper:
@@ -35,8 +37,9 @@ class FilenameMapper:
     def parse(self, filename: str) -> ParsedFilename:
         match = _RANGE_RE.match(filename)
         if match:
-            start, end = int(match.group(1)), int(match.group(2))
-            ext = match.group(3).lower()
+            prefix = match.group(1)
+            start, end = int(match.group(2)), int(match.group(3))
+            ext = match.group(4).lower()
             if start > end:
                 return ParsedFilename(
                     pattern=FilenamePattern.INVALID,
@@ -44,58 +47,42 @@ class FilenameMapper:
                     extension=ext,
                     original_filename=filename,
                     error=f"Range start ({start}) is greater than end ({end})",
+                    prefix=prefix,
                 )
-            ids = list(range(start, end + 1))
             return ParsedFilename(
                 pattern=FilenamePattern.RANGE,
-                sequential_ids=ids,
+                sequential_ids=list(range(start, end + 1)),
                 extension=ext,
                 original_filename=filename,
+                prefix=prefix,
             )
 
-        match = _MULTIPLE_HYPHEN_RE.match(filename)
-        if match:
-            seq_id = int(match.group(1))
-            ext = match.group(2).lower()
-            return ParsedFilename(
-                pattern=FilenamePattern.MULTIPLE,
-                sequential_ids=[seq_id],
-                extension=ext,
-                original_filename=filename,
-            )
-
-        match = _MULTIPLE_RE.match(filename)
-        if match:
-            seq_id = int(match.group(1))
-            ext = match.group(2).lower()
-            return ParsedFilename(
-                pattern=FilenamePattern.MULTIPLE,
-                sequential_ids=[seq_id],
-                extension=ext,
-                original_filename=filename,
-            )
-
-        match = _SINGLE_RE.match(filename)
-        if match:
-            seq_id = int(match.group(1))
-            ext = match.group(2).lower()
-            return ParsedFilename(
-                pattern=FilenamePattern.SINGLE,
-                sequential_ids=[seq_id],
-                extension=ext,
-                original_filename=filename,
-            )
+        for regex, pattern in (
+            (_MULTIPLE_HYPHEN_RE, FilenamePattern.MULTIPLE),
+            (_MULTIPLE_RE, FilenamePattern.MULTIPLE),
+            (_SINGLE_RE, FilenamePattern.SINGLE),
+        ):
+            match = regex.match(filename)
+            if match:
+                prefix = match.group(1)
+                seq_id = int(match.group(2))
+                ext = match.group(3).lower()
+                return ParsedFilename(
+                    pattern=pattern,
+                    sequential_ids=[seq_id],
+                    extension=ext,
+                    original_filename=filename,
+                    prefix=prefix,
+                )
 
         dot_idx = filename.rfind(".")
         ext = filename[dot_idx + 1 :].lower() if dot_idx != -1 else ""
-
         if ext and ext not in VALID_EXTENSIONS:
             error = f"Unsupported extension: {ext}"
         elif not ext:
             error = "Missing file extension"
         else:
             error = "Filename does not match any valid pattern"
-
         return ParsedFilename(
             pattern=FilenamePattern.INVALID,
             sequential_ids=[],

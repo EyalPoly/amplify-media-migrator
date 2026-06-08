@@ -242,3 +242,37 @@ class TestBuildS3Key:
     def test_multiple_filename(self, mapper: FilenameMapper) -> None:
         key = mapper.build_s3_key("obs-def", "6602a.jpg")
         assert key == "media/obs-def/6602a.jpg"
+
+
+class TestPrefix:
+    def test_no_prefix(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("5.jpg")
+        assert result.pattern == FilenamePattern.SINGLE
+        assert result.sequential_ids == [5]
+        assert result.prefix == ""
+
+    def test_letter_prefix_single(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("E5.jpg")
+        assert result.pattern == FilenamePattern.SINGLE
+        assert result.sequential_ids == [5]
+        assert result.prefix == "E"
+
+    def test_prefix_preserves_case(self, mapper: FilenameMapper) -> None:
+        assert mapper.parse("s5.jpg").prefix == "s"
+
+    def test_prefix_on_range(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("E6000-6005.jpg")
+        assert result.pattern == FilenamePattern.RANGE
+        assert result.sequential_ids == [6000, 6001, 6002, 6003, 6004, 6005]
+        assert result.prefix == "E"
+
+    def test_prefix_on_multiple(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("S6000a.jpg")
+        assert result.pattern == FilenamePattern.MULTIPLE
+        assert result.sequential_ids == [6000]
+        assert result.prefix == "S"
+
+    def test_multiletter_name_still_invalid(self, mapper: FilenameMapper) -> None:
+        # only a single letter immediately followed by digits is a prefix
+        result = mapper.parse("final2.jpg")
+        assert result.pattern == FilenamePattern.INVALID
