@@ -194,6 +194,34 @@ amplify-media-migrator export --folder-id FOLDER_ID --status needs_review --outp
 
 Files that don't match any pattern are marked as `needs_review`.
 
+### Prefix-based disambiguation (reused sequentialId)
+
+When `sequentialId` is reused across datasets, a single-letter filename prefix selects which
+observation a media file links to, by matching a configurable field. Configure it with
+`amplify-media-migrator config` (answer yes to "Enable prefix-based observation disambiguation"),
+or edit `~/.amplify-media-migrator/config.json`:
+
+```json
+{
+  "prefix_disambiguation": {
+    "enabled": true,
+    "discriminator_field": "countryId",
+    "prefixes": { "": "<value for no-prefix files>", "E": "<value>", "S": "*" }
+  }
+}
+```
+
+- `discriminator_field` — any Observation field/FK that tells reused-id records apart.
+- `prefixes` — maps each filename prefix (`""` = no prefix) to the value that field must equal;
+  `"*"` is a catch-all meaning "any value not listed by another prefix".
+
+The config is global and sticky: every `migrate` run applies it until you change or disable it.
+Files are never renamed — the prefix is read, not changed, and the original filename is kept in the
+S3 key. A prefix not present in `prefixes` produces an orphan (visible), never a silent mis-link.
+Only a single leading letter directly followed by digits is treated as a prefix (`E5.jpg`); names
+like `final2.jpg` are unaffected. When `enabled` is false, linking uses the first observation found
+for a `sequentialId` (legacy behaviour).
+
 ## CLI Reference
 
 | Command | Description |
