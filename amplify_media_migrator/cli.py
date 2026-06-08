@@ -61,6 +61,36 @@ def config() -> None:
     mgr.get_or_prompt("aws.amplify.api_endpoint", "AppSync API endpoint URL")
     mgr.get_or_prompt("aws.amplify.storage_bucket", "S3 storage bucket name")
 
+    click.echo("\n--- Prefix disambiguation (optional) ---")
+    pd = mgr.config.prefix_disambiguation
+    enabled = click.confirm(
+        "Enable prefix-based observation disambiguation?",
+        default=bool(pd.enabled),
+    )
+    mgr.set("prefix_disambiguation.enabled", enabled)
+    if enabled:
+        mgr.get_or_prompt(
+            "prefix_disambiguation.discriminator_field",
+            "Observation field to disambiguate on (e.g. countryId)",
+        )
+        click.echo(
+            "  Map each filename prefix to the field value it selects "
+            "('*' = catch-all)."
+        )
+        prefixes = dict(pd.prefixes)
+        while True:
+            prefix = click.prompt(
+                "  Filename prefix ('-' = no prefix; Enter to finish)",
+                default="",
+                show_default=False,
+            )
+            if prefix == "":
+                break
+            key = "" if prefix == "-" else prefix
+            value = click.prompt(f"  Value for prefix '{key}'")
+            prefixes[key] = value
+        mgr.set("prefix_disambiguation.prefixes", prefixes)
+
     try:
         mgr.config.validate()
     except ConfigurationError as e:

@@ -138,13 +138,33 @@ class TestConfigCommand:
         mock_mgr = MagicMock()
         mock_mgr_cls.return_value = mock_mgr
         mock_mgr.exists.return_value = False
-        mock_config = MagicMock()
-        mock_config.validate.side_effect = ConfigurationError("bad config")
+        mock_config = Config()
+        mock_config.validate = MagicMock(side_effect=ConfigurationError("bad config"))
         mock_mgr.config = mock_config
 
-        result = runner.invoke(main, ["config"], input="\n" * 10)
+        result = runner.invoke(main, ["config"], input="\n" * 12)
         assert result.exit_code == 1
         assert "Validation error" in result.output
+
+    @patch("amplify_media_migrator.cli.ConfigManager")
+    def test_config_prompts_prefix_disambiguation(self, mock_mgr_cls, runner):
+        mock_mgr = MagicMock()
+        mock_mgr_cls.return_value = mock_mgr
+        mock_mgr.exists.return_value = False
+        mock_mgr.config = Config()
+        mock_mgr.config_path = Path("/tmp/config.json")
+
+        # enable (y), then prefixes: "-"=no-prefix→c-med, E→c-red, S→*, blank to finish
+        user_input = (
+            "y\n" + "-\n" + "c-med\n" + "E\n" + "c-red\n" + "S\n" + "*\n" + "\n"
+        )
+        result = runner.invoke(main, ["config"], input=user_input)
+
+        assert result.exit_code == 0
+        mock_mgr.set.assert_any_call("prefix_disambiguation.enabled", True)
+        mock_mgr.set.assert_any_call(
+            "prefix_disambiguation.prefixes", {"": "c-med", "E": "c-red", "S": "*"}
+        )
 
 
 class TestShowCommand:
