@@ -1,4 +1,5 @@
 import logging
+import re
 import threading
 from dataclasses import dataclass
 from typing import Any, Dict, List, NoReturn, Optional
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 class Observation:
     id: str
     sequential_id: int
+    discriminator_value: Optional[str] = None
 
 
 @dataclass
@@ -31,17 +33,27 @@ class Media:
     is_available_for_public_use: bool
 
 
-_QUERY_OBSERVATION_BY_SEQUENTIAL_ID = """
-query GetObservationBySequentialId($sequentialId: Int!, $nextToken: String) {
-  listObservations(filter: { sequentialId: { eq: $sequentialId } }, limit: 10000, nextToken: $nextToken) {
-    items {
+_FIELD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _build_observation_query(discriminator_field: Optional[str]) -> str:
+    extra = ""
+    if discriminator_field:
+        if not _FIELD_RE.match(discriminator_field):
+            raise ValueError(f"Invalid discriminator_field: {discriminator_field!r}")
+        extra = f"\n      {discriminator_field}"
+    return f"""
+query GetObservationBySequentialId($sequentialId: Int!, $nextToken: String) {{
+  listObservations(filter: {{ sequentialId: {{ eq: $sequentialId }} }}, limit: 10000, nextToken: $nextToken) {{
+    items {{
       id
-      sequentialId
-    }
+      sequentialId{extra}
+    }}
     nextToken
-  }
-}
+  }}
+}}
 """
+
 
 _MUTATION_CREATE_MEDIA = """
 mutation CreateMedia($input: CreateMediaInput!) {
@@ -189,8 +201,9 @@ class GraphQLClient:
         return data
 
     def get_observation_by_sequential_id(
-        self, sequential_id: int
+        self, sequential_id: int, discriminator_field: Optional[str] = None
     ) -> Optional[Observation]:
+        query = _build_observation_query(discriminator_field)
         next_token: Optional[str] = None
 
         while True:
@@ -199,7 +212,7 @@ class GraphQLClient:
                 variables["nextToken"] = next_token
 
             data = self._execute(
-                _QUERY_OBSERVATION_BY_SEQUENTIAL_ID,
+                query,
                 variables=variables,
                 operation="GetObservationBySequentialId",
             )
@@ -211,11 +224,50 @@ class GraphQLClient:
                 return Observation(
                     id=item["id"],
                     sequential_id=item["sequentialId"],
+                    discriminator_value=(
+                        item.get(discriminator_field) if discriminator_field else None
+                    ),
                 )
 
             next_token = list_data.get("nextToken")
             if not next_token:
                 return None
+
+    def get_all_observations_by_sequential_id(
+        self, sequential_id: int, discriminator_field: Optional[str] = None
+    ) -> List[Observation]:
+        query = _build_observation_query(discriminator_field)
+        results: List[Observation] = []
+        next_token: Optional[str] = None
+
+        while True:
+            variables: Dict[str, Any] = {"sequentialId": sequential_id}
+            if next_token:
+                variables["nextToken"] = next_token
+
+            data = self._execute(
+                query,
+                variables=variables,
+                operation="GetObservationBySequentialId",
+            )
+
+            list_data = data.get("listObservations", {})
+            for item in list_data.get("items", []):
+                results.append(
+                    Observation(
+                        id=item["id"],
+                        sequential_id=item["sequentialId"],
+                        discriminator_value=(
+                            item.get(discriminator_field)
+                            if discriminator_field
+                            else None
+                        ),
+                    )
+                )
+
+            next_token = list_data.get("nextToken")
+            if not next_token:
+                return results
 
     def get_observations_by_sequential_ids(
         self, sequential_ids: List[int]

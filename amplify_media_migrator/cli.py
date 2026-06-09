@@ -61,6 +61,36 @@ def config() -> None:
     mgr.get_or_prompt("aws.amplify.api_endpoint", "AppSync API endpoint URL")
     mgr.get_or_prompt("aws.amplify.storage_bucket", "S3 storage bucket name")
 
+    click.echo("\n--- Prefix disambiguation (optional) ---")
+    pd = mgr.config.prefix_disambiguation
+    enabled = click.confirm(
+        "Enable prefix-based observation disambiguation?",
+        default=bool(pd.enabled),
+    )
+    mgr.set("prefix_disambiguation.enabled", enabled)
+    if enabled:
+        mgr.get_or_prompt(
+            "prefix_disambiguation.discriminator_field",
+            "Observation field to disambiguate on (e.g. countryId)",
+        )
+        click.echo(
+            "  Map each filename prefix to the field value it selects "
+            "('*' = catch-all)."
+        )
+        prefixes = dict(pd.prefixes)
+        while True:
+            prefix = click.prompt(
+                "  Filename prefix ('-' = no prefix; Enter to finish)",
+                default="",
+                show_default=False,
+            )
+            if prefix == "":
+                break
+            key = "" if prefix == "-" else prefix
+            value = click.prompt(f"  Value for prefix '{key}'")
+            prefixes[key] = value
+        mgr.set("prefix_disambiguation.prefixes", prefixes)
+
     try:
         mgr.config.validate()
     except ConfigurationError as e:
@@ -202,6 +232,8 @@ def _create_engine(
             on_token=_on_new_token,
         )
 
+    pd_cfg = cfg.config.prefix_disambiguation
+
     return MigrationEngine(
         drive_client=drive_client,
         storage_client=storage_client,
@@ -212,6 +244,9 @@ def _create_engine(
         retry_attempts=migration_cfg.retry_attempts,
         retry_delay_seconds=migration_cfg.retry_delay_seconds,
         default_media_public=migration_cfg.default_media_public,
+        disambiguation_enabled=pd_cfg.enabled,
+        discriminator_field=pd_cfg.discriminator_field or None,
+        prefix_rules=dict(pd_cfg.prefixes),
         token_manager=token_manager,
         initial_id_token=id_token,
     )

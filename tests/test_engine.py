@@ -2129,3 +2129,34 @@ class TestSessionCleanup:
             asyncio.run(engine.migrate("folder-1"))
 
         graphql_client.close.assert_called_once_with()
+
+
+class TestSelectByPrefix:
+    PREFIXES = {"": "c-med", "E": "c-red", "S": "*"}
+
+    def test_explicit_value_match(self):
+        cands = [Observation("o1", 5, "c-med"), Observation("o2", 5, "c-red")]
+        assert MigrationEngine._select_by_prefix(cands, "E", self.PREFIXES).id == "o2"
+
+    def test_empty_prefix_matches_med(self):
+        cands = [Observation("o1", 5, "c-med"), Observation("o2", 5, "c-red")]
+        assert MigrationEngine._select_by_prefix(cands, "", self.PREFIXES).id == "o1"
+
+    def test_catch_all_excludes_explicit_values(self):
+        cands = [Observation("o1", 5, "c-med"), Observation("o3", 5, "c-egypt")]
+        assert MigrationEngine._select_by_prefix(cands, "S", self.PREFIXES).id == "o3"
+
+    def test_no_match_returns_none(self):
+        cands = [Observation("o1", 5, "c-med")]
+        assert MigrationEngine._select_by_prefix(cands, "E", self.PREFIXES) is None
+
+    def test_unknown_prefix_returns_none(self):
+        cands = [Observation("o1", 5, "c-med")]
+        assert MigrationEngine._select_by_prefix(cands, "Z", self.PREFIXES) is None
+
+    def test_ambiguous_raises(self):
+        from amplify_media_migrator.utils.exceptions import MigratorError
+
+        cands = [Observation("o3", 5, "c-egypt"), Observation("o4", 5, "c-jordan")]
+        with pytest.raises(MigratorError):
+            MigrationEngine._select_by_prefix(cands, "S", self.PREFIXES)
