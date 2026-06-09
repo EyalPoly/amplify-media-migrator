@@ -2156,6 +2156,7 @@ class TestSelectByPrefix:
 
     def test_ambiguous_raises(self):
         from amplify_media_migrator.utils.exceptions import MigratorError
+
         cands = [Observation("o3", 5, "c-egypt"), Observation("o4", 5, "c-jordan")]
         with pytest.raises(MigratorError):
             MigrationEngine._select_by_prefix(cands, "S", self.PREFIXES)
