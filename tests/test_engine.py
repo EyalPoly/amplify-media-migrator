@@ -862,6 +862,119 @@ class TestRetry:
         assert progress.files["f1"].status == FileStatus.FAILED
 
 
+class TestTokenExpiryRecovery:
+    @patch("amplify_media_migrator.migration.engine.random.uniform", return_value=0)
+    def test_stream_upload_forces_refresh_on_expired_token(
+        self,
+        _mock_random: MagicMock,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+        mapper: FilenameMapper,
+    ) -> None:
+        token_manager = MagicMock()
+        token_manager.force_refresh.return_value = True
+
+        engine = MigrationEngine(
+            drive_client=drive_client,
+            storage_client=storage_client,
+            graphql_client=graphql_client,
+            progress_tracker=progress,
+            mapper=mapper,
+            concurrency=2,
+            retry_attempts=2,
+            retry_delay_seconds=0,
+            token_manager=token_manager,
+        )
+
+        progress.load("folder-1")
+        file = _drive_file("f1", "789.jpg", size=0)
+        graphql_client.get_observations_by_sequential_ids.return_value = {
+            789: _observation("obs-1", 789)
+        }
+        drive_client.open_download_stream.return_value = MagicMock()
+        storage_client.upload_file_stream.side_effect = [
+            UploadError("token expired", is_token_expired=True),
+            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/789.jpg",
+        ]
+        graphql_client.create_media.return_value = _media(
+            "m-1",
+            url="https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/789.jpg",
+        )
+
+        asyncio.run(engine.process_file(file))
+
+        token_manager.force_refresh.assert_called_once()
+        assert storage_client.upload_file_stream.call_count == 2
+        assert progress.files["f1"].status == FileStatus.COMPLETED
+
+    @patch("amplify_media_migrator.migration.engine.random.uniform", return_value=0)
+    def test_expired_token_without_token_manager_falls_back_to_backoff(
+        self,
+        _mock_random: MagicMock,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        file = _drive_file("f1", "789.jpg", size=0)
+        graphql_client.get_observations_by_sequential_ids.return_value = {
+            789: _observation("obs-1", 789)
+        }
+        drive_client.open_download_stream.return_value = MagicMock()
+        storage_client.upload_file_stream.side_effect = UploadError(
+            "token expired", is_token_expired=True
+        )
+
+        asyncio.run(engine.process_file(file))
+
+        assert storage_client.upload_file_stream.call_count == 2
+        assert progress.files["f1"].status == FileStatus.FAILED
+
+    @patch("amplify_media_migrator.migration.engine.random.uniform", return_value=0)
+    def test_failed_refresh_falls_back_to_backoff(
+        self,
+        _mock_random: MagicMock,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+        mapper: FilenameMapper,
+    ) -> None:
+        token_manager = MagicMock()
+        token_manager.force_refresh.return_value = False
+
+        engine = MigrationEngine(
+            drive_client=drive_client,
+            storage_client=storage_client,
+            graphql_client=graphql_client,
+            progress_tracker=progress,
+            mapper=mapper,
+            concurrency=2,
+            retry_attempts=2,
+            retry_delay_seconds=0,
+            token_manager=token_manager,
+        )
+
+        progress.load("folder-1")
+        file = _drive_file("f1", "789.jpg", size=0)
+        graphql_client.get_observations_by_sequential_ids.return_value = {
+            789: _observation("obs-1", 789)
+        }
+        drive_client.open_download_stream.return_value = MagicMock()
+        storage_client.upload_file_stream.side_effect = UploadError(
+            "token expired", is_token_expired=True
+        )
+
+        asyncio.run(engine.process_file(file))
+
+        assert token_manager.force_refresh.call_count == 2
+        assert progress.files["f1"].status == FileStatus.FAILED
+
+
 class TestMigrate:
     def test_processes_all_pending_files(
         self,

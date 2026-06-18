@@ -61,9 +61,11 @@ class UploadError(MigratorError):
         message: str,
         bucket: Optional[str] = None,
         key: Optional[str] = None,
+        is_token_expired: bool = False,
     ) -> None:
         self.bucket = bucket
         self.key = key
+        self.is_token_expired = is_token_expired
         super().__init__(message)
 
 

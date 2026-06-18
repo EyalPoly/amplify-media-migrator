@@ -655,6 +655,26 @@ class MigrationEngine:
             except MigratorError as e:
                 stream.cancel()
                 last_error = e
+                if getattr(e, "is_token_expired", False) and self._token_manager:
+                    refreshed = await asyncio.to_thread(
+                        self._token_manager.force_refresh
+                    )
+                    if refreshed:
+                        logger.warning(
+                            "S3 credentials expired streaming %s (attempt %d/%d); "
+                            "refreshed credentials, retrying immediately",
+                            file.id,
+                            attempt + 1,
+                            self._retry_attempts,
+                        )
+                        continue
+                    logger.warning(
+                        "S3 credentials expired streaming %s (attempt %d/%d); "
+                        "refresh failed, backing off",
+                        file.id,
+                        attempt + 1,
+                        self._retry_attempts,
+                    )
                 delay = self._retry_delay_seconds * (2**attempt) + random.uniform(0, 1)
                 logger.warning(
                     "Error streaming %s (attempt %d/%d): %s, retrying in %.1fs",

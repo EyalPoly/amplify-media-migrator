@@ -151,6 +151,86 @@ class TestCognitoTokenManager:
 
         manager.stop()
 
+    def test_refresh_fires_when_s3_creds_near_expiry_despite_fresh_jwt(self) -> None:
+        # JWT is far from expiry, but the Identity Pool S3 credentials expire
+        # soon — refresh must still fire (the bug: keying only off the JWT).
+        far_future = int(time.time()) + 7200
+        initial_token = _make_jwt(exp=far_future)
+        new_token = _make_jwt(exp=far_future)
+
+        refresh_fn = MagicMock(return_value=new_token)
+        on_token = MagicMock()
+        creds_expiry = time.time() + REFRESH_BEFORE_EXPIRY_SECONDS - 10
+
+        manager = CognitoTokenManager(
+            refresh_fn=refresh_fn,
+            on_token=on_token,
+            check_interval_seconds=0.05,
+            extra_expiry_fn=lambda: creds_expiry,
+        )
+        manager.start(initial_token)
+        time.sleep(0.2)
+        manager.stop()
+
+        refresh_fn.assert_called()
+        on_token.assert_called_with(new_token)
+
+    def test_force_refresh_distributes_new_token(self) -> None:
+        new_token = _make_jwt(exp=int(time.time()) + 3600)
+        refresh_fn = MagicMock(return_value=new_token)
+        on_token = MagicMock()
+
+        manager = CognitoTokenManager(refresh_fn=refresh_fn, on_token=on_token)
+
+        assert manager.force_refresh() is True
+        refresh_fn.assert_called_once()
+        on_token.assert_called_once_with(new_token)
+
+    def test_expiry_callback_exception_does_not_crash_loop(self) -> None:
+        far_future = int(time.time()) + 7200
+        token = _make_jwt(exp=far_future)
+
+        def _boom() -> Optional[float]:
+            raise RuntimeError("creds lookup failed")
+
+        manager = CognitoTokenManager(
+            refresh_fn=MagicMock(return_value=None),
+            on_token=MagicMock(),
+            check_interval_seconds=0.05,
+            extra_expiry_fn=_boom,
+        )
+        manager.start(token)
+        time.sleep(0.15)
+
+        assert manager._thread is not None
+        assert manager._thread.is_alive()
+        manager.stop()
+
+    def test_force_refresh_skips_when_credentials_already_fresh(self) -> None:
+        # Simulates the thundering herd: a second force_refresh after creds are
+        # already renewed must not trigger another Cognito call.
+        fresh_expiry = time.time() + 3600
+        refresh_fn = MagicMock(return_value=_make_jwt(exp=int(time.time()) + 3600))
+        on_token = MagicMock()
+
+        manager = CognitoTokenManager(
+            refresh_fn=refresh_fn,
+            on_token=on_token,
+            extra_expiry_fn=lambda: fresh_expiry,
+        )
+
+        assert manager.force_refresh() is True
+        refresh_fn.assert_not_called()
+        on_token.assert_not_called()
+
+    def test_force_refresh_returns_false_when_no_token(self) -> None:
+        manager = CognitoTokenManager(
+            refresh_fn=MagicMock(return_value=None),
+            on_token=MagicMock(),
+        )
+
+        assert manager.force_refresh() is False
+
     def test_decode_failure_logs_warning_once(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
