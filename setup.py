@@ -5,7 +5,6 @@ requirements = [
     "click>=8.1.0",
     "boto3>=1.34.0",
     "pycognito>=2023.5.0",
-    "PyJWT>=2.0.0",
     "google-api-python-client>=2.0.0",
     "google-auth-httplib2>=0.2.0",
     "google-auth-oauthlib>=1.0.0",
