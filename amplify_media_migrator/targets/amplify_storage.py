@@ -12,6 +12,10 @@ from ..utils.exceptions import AuthenticationError, UploadError
 
 logger = logging.getLogger(__name__)
 
+TOKEN_EXPIRED_CODES = frozenset(
+    {"ExpiredToken", "ExpiredTokenException", "RequestExpired", "TokenRefreshRequired"}
+)
+
 
 class AmplifyStorageClient:
     def __init__(
@@ -28,6 +32,7 @@ class AmplifyStorageClient:
         self._user_pool_id = user_pool_id
         self._max_pool_connections = max_pool_connections
         self._client: Optional[Any] = None
+        self._credentials_expiry: Optional[float] = None
 
     def connect(self, id_token: str) -> None:
         login_provider = (
@@ -49,6 +54,10 @@ class AmplifyStorageClient:
                 Logins=logins,
             )
             creds = credentials_response["Credentials"]
+            expiration = creds.get("Expiration")
+            self._credentials_expiry = (
+                expiration.timestamp() if expiration is not None else None
+            )
 
             self._client = boto3.client(
                 "s3",
@@ -65,6 +74,14 @@ class AmplifyStorageClient:
                 f"Failed to obtain S3 credentials via Identity Pool: {e}",
                 provider="cognito",
             ) from e
+
+    def credentials_expiry(self) -> Optional[float]:
+        """Unix timestamp at which the current S3 credentials expire, if known.
+
+        The Identity Pool credentials have their own ~1h lifetime, independent
+        of the Cognito ID token, so this drives proactive reconnection.
+        """
+        return self._credentials_expiry
 
     def _ensure_connected(self) -> Any:
         if self._client is None:
@@ -92,6 +109,7 @@ class AmplifyStorageClient:
             f"S3 error ({code}): {error}",
             bucket=bucket,
             key=key,
+            is_token_expired=code in TOKEN_EXPIRED_CODES,
         ) from error
 
     def upload_file(

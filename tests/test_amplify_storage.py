@@ -122,6 +122,60 @@ class TestConnect:
         assert client._client is mock_s3_client
 
     @patch("amplify_media_migrator.targets.amplify_storage.boto3")
+    def test_stores_credentials_expiry(
+        self, mock_boto3: MagicMock, client: AmplifyStorageClient
+    ) -> None:
+        from datetime import datetime, timezone
+
+        expiration = datetime(2026, 6, 18, 23, 0, 0, tzinfo=timezone.utc)
+        mock_identity_client = MagicMock()
+        mock_identity_client.get_id.return_value = {"IdentityId": "id-1"}
+        mock_identity_client.get_credentials_for_identity.return_value = {
+            "Credentials": {
+                "AccessKeyId": "AKID",
+                "SecretKey": "SECRET",
+                "SessionToken": "TOKEN",
+                "Expiration": expiration,
+            }
+        }
+
+        def client_factory(service: str, **kwargs: object) -> MagicMock:
+            return (
+                mock_identity_client if service == "cognito-identity" else MagicMock()
+            )
+
+        mock_boto3.client.side_effect = client_factory
+
+        client.connect(ID_TOKEN)
+
+        assert client.credentials_expiry() == expiration.timestamp()
+
+    @patch("amplify_media_migrator.targets.amplify_storage.boto3")
+    def test_credentials_expiry_none_when_absent(
+        self, mock_boto3: MagicMock, client: AmplifyStorageClient
+    ) -> None:
+        mock_identity_client = MagicMock()
+        mock_identity_client.get_id.return_value = {"IdentityId": "id-1"}
+        mock_identity_client.get_credentials_for_identity.return_value = {
+            "Credentials": {
+                "AccessKeyId": "AKID",
+                "SecretKey": "SECRET",
+                "SessionToken": "TOKEN",
+            }
+        }
+
+        def client_factory(service: str, **kwargs: object) -> MagicMock:
+            return (
+                mock_identity_client if service == "cognito-identity" else MagicMock()
+            )
+
+        mock_boto3.client.side_effect = client_factory
+
+        client.connect(ID_TOKEN)
+
+        assert client.credentials_expiry() is None
+
+    @patch("amplify_media_migrator.targets.amplify_storage.boto3")
     def test_client_error_raises_auth_error(
         self, mock_boto3: MagicMock, client: AmplifyStorageClient
     ) -> None:
@@ -156,10 +210,18 @@ class TestHandleClientError:
     def test_expired_token_raises_upload_error(self) -> None:
         # ExpiredToken is transient (credential rotation window) — treat as
         # retryable UploadError rather than fatal AuthenticationError.
-        with pytest.raises(UploadError, match="ExpiredToken"):
+        with pytest.raises(UploadError, match="ExpiredToken") as exc_info:
             AmplifyStorageClient._handle_client_error(
                 _make_client_error("ExpiredToken")
             )
+        assert exc_info.value.is_token_expired is True
+
+    def test_non_token_upload_error_not_flagged(self) -> None:
+        with pytest.raises(UploadError) as exc_info:
+            AmplifyStorageClient._handle_client_error(
+                _make_client_error("NoSuchBucket")
+            )
+        assert exc_info.value.is_token_expired is False
 
     def test_invalid_key_raises_auth_error(self) -> None:
         with pytest.raises(AuthenticationError, match="InvalidAccessKeyId"):

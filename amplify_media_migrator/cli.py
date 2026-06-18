@@ -230,6 +230,7 @@ def _create_engine(
         token_manager = CognitoTokenManager(
             refresh_fn=_refresh_cognito_token,
             on_token=_on_new_token,
+            extra_expiry_fn=storage_client.credentials_expiry,
         )
 
     pd_cfg = cfg.config.prefix_disambiguation
