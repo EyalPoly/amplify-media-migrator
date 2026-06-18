@@ -44,7 +44,7 @@ class AWSConfig:
 
 @dataclass
 class MigrationConfig:
-    concurrency: int = 100
+    concurrency: int = 50
     retry_attempts: int = 3
     retry_delay_seconds: int = 5
     chunk_size_mb: int = 8
