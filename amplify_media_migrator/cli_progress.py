@@ -13,6 +13,7 @@ from .migration.reporter import RollingRate
 
 ACTIVE_ROW_CAP = 8
 _GLOBAL_PHASE = "uploading"
+_PHASE_MARKERS = {"downloading": "↓", "uploading": "↑"}
 
 
 def format_bytes(num: float) -> str:
@@ -177,8 +178,16 @@ class LiveReporter:
                         completed=min(state.bytes_done, state.size or state.bytes_done),
                         width=20,
                     ),
-                    Text(f"{fpct:.0f}%" if state.size else state.phase),
-                    Text(format_bytes(state.bytes_done)),
+                    Text(
+                        f"{_PHASE_MARKERS.get(state.phase, '')}{fpct:.0f}%"
+                        if state.size
+                        else state.phase
+                    ),
+                    Text(
+                        f"{format_bytes(state.bytes_done)}/{format_bytes(state.size)}"
+                        if state.size
+                        else format_bytes(state.bytes_done)
+                    ),
                     Text(f"{state.rate.mbps():.1f} MB/s"),
                 )
             renderables.append(table)
