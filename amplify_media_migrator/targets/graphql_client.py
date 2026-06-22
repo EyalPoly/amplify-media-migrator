@@ -152,6 +152,7 @@ class GraphQLClient:
         raise GraphQLError(
             f"GraphQL HTTP error ({status_code}): {response_text}",
             operation=operation,
+            is_retryable=status_code >= 500,
         )
 
     def _execute(
@@ -181,6 +182,7 @@ class GraphQLClient:
             raise GraphQLError(
                 f"GraphQL request failed: {e}",
                 operation=operation,
+                is_retryable=True,
             ) from e
 
         if response.status_code != 200:

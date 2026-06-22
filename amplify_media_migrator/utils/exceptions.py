@@ -77,9 +77,11 @@ class GraphQLError(MigratorError):
         message: str,
         operation: Optional[str] = None,
         errors: Optional[List[Any]] = None,
+        is_retryable: bool = False,
     ) -> None:
         self.operation = operation
         self.errors: List[Any] = errors or []
+        self.is_retryable = is_retryable
         super().__init__(message)
 
 

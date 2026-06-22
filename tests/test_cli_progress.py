@@ -139,4 +139,5 @@ class TestLiveReporterRender:
         line = r.plain_line()
         assert "Migrating" in line
         assert "MB/s" in line
+        assert "total 2" in line
         assert "1 active" in line

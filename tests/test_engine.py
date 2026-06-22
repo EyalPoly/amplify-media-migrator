@@ -861,6 +861,142 @@ class TestRetry:
         assert drive_client.download_file.call_count == 2
         assert progress.files["f1"].status == FileStatus.FAILED
 
+    @patch("amplify_media_migrator.migration.engine.random.uniform", return_value=0)
+    def test_retries_upload_on_connection_error(
+        self,
+        _mock_random: MagicMock,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        file = _drive_file("f1", "6602.jpg")
+        obs = _observation("obs-1", 6602)
+
+        graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
+        drive_client.download_file.return_value = b"photo bytes"
+        storage_client.upload_file.side_effect = [
+            UploadError("S3 connection error: could not resolve host"),
+            "https://bucket/media/obs-1/6602.jpg",
+        ]
+        graphql_client.create_media.return_value = _media("m-1")
+
+        asyncio.run(engine.process_file(file))
+
+        assert storage_client.upload_file.call_count == 2
+        assert progress.files["f1"].status == FileStatus.COMPLETED
+
+    @patch("amplify_media_migrator.migration.engine.random.uniform", return_value=0)
+    def test_upload_exhausts_retries_then_fails(
+        self,
+        _mock_random: MagicMock,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        file = _drive_file("f1", "6602.jpg")
+        obs = _observation("obs-1", 6602)
+
+        graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
+        drive_client.download_file.return_value = b"photo bytes"
+        storage_client.upload_file.side_effect = UploadError("S3 connection error")
+
+        asyncio.run(engine.process_file(file))
+
+        assert storage_client.upload_file.call_count == 2
+        assert progress.files["f1"].status == FileStatus.FAILED
+        graphql_client.create_media.assert_not_called()
+
+    @patch("amplify_media_migrator.migration.engine.random.uniform", return_value=0)
+    def test_retries_create_media_on_transient_graphql_error(
+        self,
+        _mock_random: MagicMock,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        file = _drive_file("f1", "6602.jpg")
+        obs = _observation("obs-1", 6602)
+
+        graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
+        drive_client.download_file.return_value = b"data"
+        storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
+        graphql_client.create_media.side_effect = [
+            GraphQLError(
+                "Connection reset by peer",
+                operation="CreateMedia",
+                is_retryable=True,
+            ),
+            _media("m-1"),
+        ]
+
+        asyncio.run(engine.process_file(file))
+
+        assert graphql_client.create_media.call_count == 2
+        assert progress.files["f1"].status == FileStatus.COMPLETED
+
+    @patch("amplify_media_migrator.migration.engine.random.uniform", return_value=0)
+    def test_does_not_retry_create_media_on_non_retryable_error(
+        self,
+        _mock_random: MagicMock,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        file = _drive_file("f1", "6602.jpg")
+        obs = _observation("obs-1", 6602)
+
+        graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
+        drive_client.download_file.return_value = b"data"
+        storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
+        graphql_client.create_media.side_effect = GraphQLError(
+            "Schema validation failed", operation="CreateMedia"
+        )
+
+        asyncio.run(engine.process_file(file))
+
+        assert graphql_client.create_media.call_count == 1
+        assert progress.files["f1"].status == FileStatus.FAILED
+
+    @patch("amplify_media_migrator.migration.engine.random.uniform", return_value=0)
+    def test_create_media_exhausts_retries_then_fails(
+        self,
+        _mock_random: MagicMock,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        file = _drive_file("f1", "6602.jpg")
+        obs = _observation("obs-1", 6602)
+
+        graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
+        drive_client.download_file.return_value = b"data"
+        storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
+        graphql_client.create_media.side_effect = GraphQLError(
+            "Connection reset by peer",
+            operation="CreateMedia",
+            is_retryable=True,
+        )
+
+        asyncio.run(engine.process_file(file))
+
+        assert graphql_client.create_media.call_count == 2
+        assert progress.files["f1"].status == FileStatus.FAILED
+
 
 class TestTokenExpiryRecovery:
     @patch("amplify_media_migrator.migration.engine.random.uniform", return_value=0)
