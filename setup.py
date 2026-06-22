@@ -26,7 +26,7 @@ dev_requirements = [
 
 setup(
     name="amplify-media-migrator",
-    version="1.5.6",
+    version="1.5.7",
     description="CLI tool to migrate media files from Google Drive to AWS Amplify Storage",
     author="MECO Team",
     python_requires=">=3.9",
