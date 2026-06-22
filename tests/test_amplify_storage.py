@@ -2,7 +2,7 @@ from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, EndpointConnectionError
 
 from amplify_media_migrator.targets.amplify_storage import AmplifyStorageClient
 from amplify_media_migrator.utils.exceptions import (
@@ -303,6 +303,18 @@ class TestUploadFile:
     def test_not_connected_raises(self, client: AmplifyStorageClient) -> None:
         with pytest.raises(UploadError, match="Not connected"):
             client.upload_file(data=b"data", key="test.jpg", content_type="image/jpeg")
+
+    def test_connection_error_raises_upload_error(
+        self, connected_client: AmplifyStorageClient, mock_s3: MagicMock
+    ) -> None:
+        mock_s3.upload_fileobj.side_effect = EndpointConnectionError(
+            endpoint_url="https://bucket.s3.amazonaws.com"
+        )
+
+        with pytest.raises(UploadError, match="connection error"):
+            connected_client.upload_file(
+                data=b"data", key="test.jpg", content_type="image/jpeg"
+            )
 
 
 class TestUploadFileMultipart:

@@ -6,7 +6,7 @@ from typing import Any, Callable, NoReturn, Optional
 import boto3
 from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 from ..utils.exceptions import AuthenticationError, UploadError
 
@@ -112,6 +112,18 @@ class AmplifyStorageClient:
             is_token_expired=code in TOKEN_EXPIRED_CODES,
         ) from error
 
+    @staticmethod
+    def _handle_botocore_error(
+        error: BotoCoreError,
+        key: Optional[str] = None,
+        bucket: Optional[str] = None,
+    ) -> NoReturn:
+        raise UploadError(
+            f"S3 connection error: {error}",
+            bucket=bucket,
+            key=key,
+        ) from error
+
     def upload_file(
         self,
         data: bytes,
@@ -130,6 +142,8 @@ class AmplifyStorageClient:
             )
         except ClientError as e:
             self._handle_client_error(e, key=key, bucket=self._bucket)
+        except BotoCoreError as e:
+            self._handle_botocore_error(e, key=key, bucket=self._bucket)
 
         url = self.get_url(key)
         logger.debug("Uploaded %s to %s", key, url)
@@ -159,6 +173,8 @@ class AmplifyStorageClient:
             )
         except ClientError as e:
             self._handle_client_error(e, key=key, bucket=self._bucket)
+        except BotoCoreError as e:
+            self._handle_botocore_error(e, key=key, bucket=self._bucket)
 
         url = self.get_url(key)
         logger.debug("Streamed upload %s to %s", key, url)
@@ -188,6 +204,8 @@ class AmplifyStorageClient:
             )
         except ClientError as e:
             self._handle_client_error(e, key=key, bucket=self._bucket)
+        except BotoCoreError as e:
+            self._handle_botocore_error(e, key=key, bucket=self._bucket)
 
         url = self.get_url(key)
         logger.debug("Multipart uploaded %s to %s", key, url)

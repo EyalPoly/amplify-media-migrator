@@ -132,7 +132,7 @@ class LiveReporter:
 
     def render(self) -> RenderableType:
         with self._lock:
-            done, total, _total_files, counts, active, mbps = self._snapshot()
+            done, total, total_files, counts, active, mbps = self._snapshot()
             eta = self._eta(done, total)
             elapsed = self._clock() - self._start
             n_active = len(self._active)
@@ -151,6 +151,7 @@ class LiveReporter:
         )
 
         counts_line = Text(
+            f"total {total_files}  "
             f"ok {counts.get('completed', 0)}  "
             f"fail {counts.get('failed', 0)}  "
             f"orphan {counts.get('orphan', 0)}  "
@@ -198,13 +199,14 @@ class LiveReporter:
 
     def plain_line(self) -> str:
         with self._lock:
-            done, total, _total_files, counts, _active, mbps = self._snapshot()
+            done, total, total_files, counts, _active, mbps = self._snapshot()
             eta = self._eta(done, total)
             n_active = len(self._active)
         pct = (done / total * 100) if total else 0.0
         return (
             f"Migrating {pct:.0f}% · {format_bytes(done)}/{format_bytes(total)} · "
             f"{mbps:.1f} MB/s · ETA {eta} · "
-            f"ok {counts.get('completed', 0)} fail {counts.get('failed', 0)} "
+            f"total {total_files} ok {counts.get('completed', 0)} "
+            f"fail {counts.get('failed', 0)} "
             f"orphan {counts.get('orphan', 0)} · {n_active} active"
         )

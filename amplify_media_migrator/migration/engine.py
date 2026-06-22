@@ -8,14 +8,16 @@ from typing import Callable, Dict, List, Optional
 from ..auth.token_manager import CognitoTokenManager
 from ..sources.google_drive import DriveFile, GoogleDriveClient
 from ..targets.amplify_storage import AmplifyStorageClient
-from ..targets.graphql_client import GraphQLClient, Observation
+from ..targets.graphql_client import GraphQLClient, Media, Observation
 from ..utils.exceptions import (
     AuthenticationError,
     DownloadError,
+    GraphQLError,
     MigratorError,
     RateLimitError,
+    UploadError,
 )
-from ..utils.media import get_content_type, get_media_type
+from ..utils.media import MediaType, get_content_type, get_media_type
 from .mapper import FilenameMapper, FilenamePattern, ParsedFilename
 from .progress import FileStatus, ProgressTracker
 from .reporter import NullReporter, ProgressReporter
@@ -486,12 +488,8 @@ class MigrationEngine:
             self._reporter.on_file_phase(file.id, "uploading")
             content_type = get_content_type(parsed.extension)
             try:
-                s3_url = await asyncio.to_thread(
-                    self._storage_client.upload_file,
-                    data,
-                    s3_key,
-                    content_type,
-                    self._make_cumulative_callback(_on_bytes),
+                s3_url = await self._upload_with_retry(
+                    file, data, s3_key, content_type, _on_bytes
                 )
             except AuthenticationError:
                 raise
@@ -515,8 +513,7 @@ class MigrationEngine:
 
         for seq_id, obs in observations.items():
             try:
-                media = await asyncio.to_thread(
-                    self._graphql_client.create_media,
+                media = await self._create_media_with_retry(
                     s3_url,
                     obs.id,
                     media_type,
@@ -611,6 +608,80 @@ class MigrationEngine:
             file_id=file_id,
         )
 
+    async def _upload_with_retry(
+        self,
+        file: DriveFile,
+        data: bytes,
+        s3_key: str,
+        content_type: str,
+        on_bytes: Optional[Callable[[int], None]] = None,
+    ) -> str:
+        last_error: Optional[MigratorError] = None
+        for attempt in range(self._retry_attempts):
+            callback = (
+                self._make_cumulative_callback(on_bytes)
+                if on_bytes is not None
+                else None
+            )
+            try:
+                return await asyncio.to_thread(
+                    self._storage_client.upload_file,
+                    data,
+                    s3_key,
+                    content_type,
+                    callback,
+                )
+            except AuthenticationError:
+                raise
+            except RateLimitError as e:
+                last_error = e
+                delay = e.retry_after or self._retry_delay_seconds * (2**attempt)
+                delay += random.uniform(0, 1)
+                logger.warning(
+                    "Rate limit uploading %s (attempt %d/%d), retrying in %.1fs",
+                    file.id,
+                    attempt + 1,
+                    self._retry_attempts,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+            except MigratorError as e:
+                last_error = e
+                if getattr(e, "is_token_expired", False) and self._token_manager:
+                    refreshed = await asyncio.to_thread(
+                        self._token_manager.force_refresh
+                    )
+                    if refreshed:
+                        logger.warning(
+                            "S3 credentials expired uploading %s (attempt %d/%d); "
+                            "refreshed credentials, retrying immediately",
+                            file.id,
+                            attempt + 1,
+                            self._retry_attempts,
+                        )
+                        continue
+                    logger.warning(
+                        "S3 credentials expired uploading %s (attempt %d/%d); "
+                        "refresh failed, backing off",
+                        file.id,
+                        attempt + 1,
+                        self._retry_attempts,
+                    )
+                delay = self._retry_delay_seconds * (2**attempt) + random.uniform(0, 1)
+                logger.warning(
+                    "Error uploading %s (attempt %d/%d): %s, retrying in %.1fs",
+                    file.id,
+                    attempt + 1,
+                    self._retry_attempts,
+                    e,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+        raise last_error or UploadError(
+            f"Upload failed after {self._retry_attempts} attempts",
+            key=s3_key,
+        )
+
     async def _stream_upload_with_retry(
         self,
         file: DriveFile,
@@ -688,6 +759,57 @@ class MigrationEngine:
         raise last_error or DownloadError(
             f"Stream upload failed after {self._retry_attempts} attempts",
             file_id=file.id,
+        )
+
+    async def _create_media_with_retry(
+        self,
+        url: str,
+        observation_id: str,
+        media_type: MediaType,
+        is_public: bool,
+    ) -> Media:
+        last_error: Optional[MigratorError] = None
+        for attempt in range(self._retry_attempts):
+            try:
+                return await asyncio.to_thread(
+                    self._graphql_client.create_media,
+                    url,
+                    observation_id,
+                    media_type,
+                    is_public,
+                )
+            except RateLimitError as e:
+                last_error = e
+                delay = e.retry_after or self._retry_delay_seconds * (2**attempt)
+                delay += random.uniform(0, 1)
+                logger.warning(
+                    "Rate limit creating media for obs=%s (attempt %d/%d), "
+                    "retrying in %.1fs",
+                    observation_id,
+                    attempt + 1,
+                    self._retry_attempts,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+            except GraphQLError as e:
+                if not e.is_retryable:
+                    raise
+                last_error = e
+                delay = self._retry_delay_seconds * (2**attempt) + random.uniform(0, 1)
+                logger.warning(
+                    "Error creating media for obs=%s (attempt %d/%d): %s, "
+                    "retrying in %.1fs",
+                    observation_id,
+                    attempt + 1,
+                    self._retry_attempts,
+                    e,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+
+        raise last_error or GraphQLError(
+            f"create_media failed after {self._retry_attempts} attempts",
+            operation="CreateMedia",
         )
 
     def _mark_failed(self, file: DriveFile, parsed: ParsedFilename, error: str) -> None:
