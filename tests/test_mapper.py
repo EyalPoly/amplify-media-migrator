@@ -90,6 +90,28 @@ class TestMultiplePattern:
         assert result.sequential_ids == [131]
         assert result.extension == "mov"
 
+    def test_hyphen_double_letter(self, mapper: FilenameMapper) -> None:
+        for label in ["AA", "AB", "AC", "DD", "AN"]:
+            result = mapper.parse(f"1550-{label}.jpg")
+            assert result.pattern == FilenamePattern.MULTIPLE
+            assert result.sequential_ids == [1550]
+            assert result.extension == "jpg"
+
+    def test_hyphen_letter_with_drive_duplicate_suffix(
+        self, mapper: FilenameMapper
+    ) -> None:
+        result = mapper.parse("1540-A (1).jpg")
+        assert result.pattern == FilenamePattern.MULTIPLE
+        assert result.sequential_ids == [1540]
+        assert result.extension == "jpg"
+        assert result.error is None
+
+    def test_hyphen_non_ascii_letter(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("1885-ק.jpg")
+        assert result.pattern == FilenamePattern.MULTIPLE
+        assert result.sequential_ids == [1885]
+        assert result.extension == "jpg"
+
 
 class TestRangePattern:
     def test_basic(self, mapper: FilenameMapper) -> None:
