@@ -186,6 +186,7 @@ class ConcurrencyController:
         stop: asyncio.Event,
         window_seconds: float,
         clock: Callable[[], float] = time.monotonic,
+        on_limit: Optional[Callable[[int], None]] = None,
     ) -> None:
         last_total = meter.total()
         last_time = clock()
@@ -201,5 +202,7 @@ class ConcurrencyController:
             dt = now - last_time
             rate = (total - last_total) / dt if dt > 0 else 0.0
             self.step(self._take_errors(), rate)
+            if on_limit is not None:
+                on_limit(self.current_limit())
             await self.notify_waiters()
             last_total, last_time = total, now

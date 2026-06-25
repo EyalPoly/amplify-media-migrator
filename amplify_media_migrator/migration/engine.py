@@ -314,7 +314,12 @@ class MigrationEngine:
         if controller is not None:
             stop = asyncio.Event()
             control_task = asyncio.ensure_future(
-                controller.run(self._throughput, stop, self._window_seconds)
+                controller.run(
+                    self._throughput,
+                    stop,
+                    self._window_seconds,
+                    on_limit=self._reporter.on_concurrency,
+                )
             )
             try:
                 await asyncio.gather(*(worker() for _ in range(worker_count)))

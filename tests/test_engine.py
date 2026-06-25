@@ -1605,6 +1605,9 @@ class FakeReporter:
     def on_file_done(self, file_id: str, status: FileStatus) -> None:
         self.events.append(("done", file_id, status))
 
+    def on_concurrency(self, limit: int) -> None:
+        self.events.append(("concurrency", limit))
+
 
 class TestProgressReporter:
     def test_done_emitted_on_completion(

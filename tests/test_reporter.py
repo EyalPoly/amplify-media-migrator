@@ -89,3 +89,6 @@ class TestNullReporter:
         reporter.on_file_bytes("id", 5)
         reporter.on_file_phase("id", "uploading")
         reporter.on_file_done("id", FileStatus.COMPLETED)
+
+    def test_null_reporter_accepts_concurrency(self) -> None:
+        NullReporter().on_concurrency(7)

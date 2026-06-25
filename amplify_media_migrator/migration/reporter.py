@@ -16,6 +16,8 @@ class ProgressReporter(Protocol):
 
     def on_file_done(self, file_id: str, status: FileStatus) -> None: ...
 
+    def on_concurrency(self, limit: int) -> None: ...
+
 
 class NullReporter:
     """No-op reporter; the engine's default so it stays headless and testable."""
@@ -33,6 +35,9 @@ class NullReporter:
         pass
 
     def on_file_done(self, file_id: str, status: FileStatus) -> None:
+        pass
+
+    def on_concurrency(self, limit: int) -> None:
         pass
 
 
