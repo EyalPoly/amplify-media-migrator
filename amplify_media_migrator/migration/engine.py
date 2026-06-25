@@ -18,6 +18,12 @@ from ..utils.exceptions import (
     UploadError,
 )
 from ..utils.media import MediaType, get_content_type, get_media_type
+from .concurrency import (
+    AdaptiveSettings,
+    ConcurrencyController,
+    InflightBudget,
+    ThroughputMeter,
+)
 from .mapper import FilenameMapper, FilenamePattern, ParsedFilename
 from .progress import FileStatus, ProgressTracker
 from .reporter import NullReporter, ProgressReporter
@@ -43,6 +49,7 @@ class MigrationEngine:
         large_file_threshold_mb: int = 25,
         token_manager: Optional[CognitoTokenManager] = None,
         initial_id_token: Optional[str] = None,
+        adaptive: Optional[AdaptiveSettings] = None,
     ) -> None:
         self._drive_client = drive_client
         self._storage_client = storage_client
@@ -61,6 +68,26 @@ class MigrationEngine:
         self._initial_id_token = initial_id_token
         self._uploaded_urls: set[str] = set()
         self._reporter: ProgressReporter = NullReporter()
+
+        settings = adaptive or AdaptiveSettings()
+        self._window_seconds = settings.window_seconds
+        self._throughput = ThroughputMeter()
+        self._inflight_budget = InflightBudget(
+            settings.max_inflight_buffer_mb * 1024 * 1024
+        )
+        if settings.enabled:
+            initial = (
+                settings.initial_workers
+                if settings.initial_workers is not None
+                else max(settings.min_workers, concurrency // 2)
+            )
+            self._controller: Optional[ConcurrencyController] = ConcurrencyController(
+                min_workers=settings.min_workers,
+                max_workers=concurrency,
+                initial=initial,
+            )
+        else:
+            self._controller = None
 
     def set_reporter(self, reporter: ProgressReporter) -> None:
         self._reporter = reporter
@@ -263,21 +290,39 @@ class MigrationEngine:
             queue.put_nowait(file)
 
         aborted: List[BaseException] = []
+        controller = self._controller
 
         async def worker() -> None:
             while not aborted:
+                if controller is not None:
+                    await controller.acquire()
                 try:
-                    file = queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    return
-                try:
-                    await self.process_file(file, dry_run)
-                except BaseException as exc:  # noqa: BLE001
-                    aborted.append(exc)
-                    return
+                    try:
+                        file = queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        return
+                    try:
+                        await self.process_file(file, dry_run)
+                    except BaseException as exc:  # noqa: BLE001
+                        aborted.append(exc)
+                        return
+                finally:
+                    if controller is not None:
+                        await controller.release()
 
         worker_count = min(self._concurrency, len(files_to_process))
-        await asyncio.gather(*(worker() for _ in range(worker_count)))
+        if controller is not None:
+            stop = asyncio.Event()
+            control_task = asyncio.ensure_future(
+                controller.run(self._throughput, stop, self._window_seconds)
+            )
+            try:
+                await asyncio.gather(*(worker() for _ in range(worker_count)))
+            finally:
+                stop.set()
+                await control_task
+        else:
+            await asyncio.gather(*(worker() for _ in range(worker_count)))
 
         if aborted:
             raise aborted[0]
@@ -442,8 +487,19 @@ class MigrationEngine:
         # If this file was previously uploaded (interrupted after S3 upload but
         # before media record creation), reuse the stored S3 URL and skip
         # the download/upload entirely.
-        def _on_bytes(bytes_done: int) -> None:
-            self._reporter.on_file_bytes(file.id, bytes_done)
+        def _metered_callback() -> Callable[[int], None]:
+            # download_file and the cumulative-wrapped upload both report a
+            # per-phase cumulative count; convert to deltas for the global
+            # meter while still forwarding cumulative to the reporter.
+            last = 0
+
+            def _cb(cumulative: int) -> None:
+                nonlocal last
+                self._throughput.add(cumulative - last)
+                last = cumulative
+                self._reporter.on_file_bytes(file.id, cumulative)
+
+            return _cb
 
         stored = self._progress.get_file(file.id)
         if stored and stored.status == FileStatus.UPLOADED and stored.s3_url:
@@ -453,7 +509,7 @@ class MigrationEngine:
             content_type = get_content_type(parsed.extension)
             try:
                 s3_url = await self._stream_upload_with_retry(
-                    file, s3_key, content_type, _on_bytes
+                    file, s3_key, content_type, _metered_callback()
                 )
             except AuthenticationError:
                 raise
@@ -469,33 +525,34 @@ class MigrationEngine:
                 s3_url=s3_url,
             )
         else:
-            self._reporter.on_file_phase(file.id, "downloading")
-            try:
-                data = await self._download_with_retry(file.id, _on_bytes)
-            except AuthenticationError:
-                raise
-            except MigratorError as e:
-                self._mark_failed(file, parsed, f"Download failed: {e}")
-                return
+            async with self._inflight_budget.reserve(file.size):
+                self._reporter.on_file_phase(file.id, "downloading")
+                try:
+                    data = await self._download_with_retry(file.id, _metered_callback())
+                except AuthenticationError:
+                    raise
+                except MigratorError as e:
+                    self._mark_failed(file, parsed, f"Download failed: {e}")
+                    return
 
-            self._progress.update_file(
-                file_id=file.id,
-                filename=file.name,
-                status=FileStatus.DOWNLOADED,
-                sequential_ids=parsed.sequential_ids,
-            )
-
-            self._reporter.on_file_phase(file.id, "uploading")
-            content_type = get_content_type(parsed.extension)
-            try:
-                s3_url = await self._upload_with_retry(
-                    file, data, s3_key, content_type, _on_bytes
+                self._progress.update_file(
+                    file_id=file.id,
+                    filename=file.name,
+                    status=FileStatus.DOWNLOADED,
+                    sequential_ids=parsed.sequential_ids,
                 )
-            except AuthenticationError:
-                raise
-            except MigratorError as e:
-                self._mark_failed(file, parsed, f"Upload failed: {e}")
-                return
+
+                self._reporter.on_file_phase(file.id, "uploading")
+                content_type = get_content_type(parsed.extension)
+                try:
+                    s3_url = await self._upload_with_retry(
+                        file, data, s3_key, content_type, _metered_callback()
+                    )
+                except AuthenticationError:
+                    raise
+                except MigratorError as e:
+                    self._mark_failed(file, parsed, f"Upload failed: {e}")
+                    return
 
             self._progress.update_file(
                 file_id=file.id,
@@ -568,6 +625,10 @@ class MigrationEngine:
 
         return _cb
 
+    def _note_retryable_error(self) -> None:
+        if self._controller is not None:
+            self._controller.record_retryable_error()
+
     async def _download_with_retry(
         self, file_id: str, on_bytes: Optional[Callable[[int], None]] = None
     ) -> bytes:
@@ -580,6 +641,7 @@ class MigrationEngine:
                 return data
             except RateLimitError as e:
                 last_error = e
+                self._note_retryable_error()
                 delay = e.retry_after or self._retry_delay_seconds * (2**attempt)
                 delay += random.uniform(0, 1)
                 logger.warning(
@@ -592,6 +654,7 @@ class MigrationEngine:
                 await asyncio.sleep(delay)
             except (DownloadError,) as e:
                 last_error = e
+                self._note_retryable_error()
                 delay = self._retry_delay_seconds * (2**attempt) + random.uniform(0, 1)
                 logger.warning(
                     "Error downloading %s (attempt %d/%d): %s, retrying in %.1fs",
@@ -635,6 +698,7 @@ class MigrationEngine:
                 raise
             except RateLimitError as e:
                 last_error = e
+                self._note_retryable_error()
                 delay = e.retry_after or self._retry_delay_seconds * (2**attempt)
                 delay += random.uniform(0, 1)
                 logger.warning(
@@ -667,6 +731,7 @@ class MigrationEngine:
                         attempt + 1,
                         self._retry_attempts,
                     )
+                self._note_retryable_error()
                 delay = self._retry_delay_seconds * (2**attempt) + random.uniform(0, 1)
                 logger.warning(
                     "Error uploading %s (attempt %d/%d): %s, retrying in %.1fs",
@@ -713,6 +778,7 @@ class MigrationEngine:
             except RateLimitError as e:
                 stream.cancel()
                 last_error = e
+                self._note_retryable_error()
                 delay = e.retry_after or self._retry_delay_seconds * (2**attempt)
                 delay += random.uniform(0, 1)
                 logger.warning(
@@ -746,6 +812,7 @@ class MigrationEngine:
                         attempt + 1,
                         self._retry_attempts,
                     )
+                self._note_retryable_error()
                 delay = self._retry_delay_seconds * (2**attempt) + random.uniform(0, 1)
                 logger.warning(
                     "Error streaming %s (attempt %d/%d): %s, retrying in %.1fs",
@@ -780,6 +847,7 @@ class MigrationEngine:
                 )
             except RateLimitError as e:
                 last_error = e
+                self._note_retryable_error()
                 delay = e.retry_after or self._retry_delay_seconds * (2**attempt)
                 delay += random.uniform(0, 1)
                 logger.warning(
@@ -795,6 +863,7 @@ class MigrationEngine:
                 if not e.is_retryable:
                     raise
                 last_error = e
+                self._note_retryable_error()
                 delay = self._retry_delay_seconds * (2**attempt) + random.uniform(0, 1)
                 logger.warning(
                     "Error creating media for obs=%s (attempt %d/%d): %s, "

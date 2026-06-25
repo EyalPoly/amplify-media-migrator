@@ -1,7 +1,19 @@
 import asyncio
 import threading
 import time
+from dataclasses import dataclass
 from typing import Callable, Optional
+
+
+@dataclass
+class AdaptiveSettings:
+    """Runtime tunables for adaptive concurrency and the in-flight memory cap."""
+
+    enabled: bool = True
+    min_workers: int = 4
+    initial_workers: Optional[int] = None
+    max_inflight_buffer_mb: int = 512
+    window_seconds: float = 10.0
 
 
 class ThroughputMeter:
