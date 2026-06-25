@@ -12,6 +12,7 @@ from .auth.google_drive import GoogleDriveAuthProvider
 from .auth.token_manager import CognitoTokenManager
 from .cli_progress import LiveReporter
 from .config import ConfigManager, ConfigurationError, config_to_dict
+from .migration.concurrency import AdaptiveSettings
 from .migration.engine import MigrationEngine
 from .migration.mapper import FilenameMapper
 from .migration.progress import FileStatus, ProgressTracker
@@ -178,6 +179,16 @@ def _authenticate_cognito(cfg: ConfigManager) -> tuple[str, Any]:
     return id_token, cognito
 
 
+def _adaptive_settings(migration_cfg: Any) -> AdaptiveSettings:
+    return AdaptiveSettings(
+        enabled=migration_cfg.adaptive_concurrency,
+        min_workers=migration_cfg.min_workers,
+        initial_workers=migration_cfg.initial_workers,
+        max_inflight_buffer_mb=migration_cfg.max_inflight_buffer_mb,
+        window_seconds=migration_cfg.window_seconds,
+    )
+
+
 def _create_engine(
     cfg: ConfigManager,
     drive_client: GoogleDriveClient,
@@ -250,6 +261,7 @@ def _create_engine(
         prefix_rules=dict(pd_cfg.prefixes),
         token_manager=token_manager,
         initial_id_token=id_token,
+        adaptive=_adaptive_settings(migration_cfg),
     )
 
 
@@ -394,6 +406,7 @@ def scan(folder_id: str) -> None:
         progress_tracker=ProgressTracker(),
         mapper=FilenameMapper(),
         concurrency=cfg.config.migration.concurrency,
+        adaptive=AdaptiveSettings(enabled=False),
     )
 
     try:
