@@ -67,3 +67,78 @@ class TestInflightBudget:
         async with budget.reserve(900):
             assert budget.available() == 0
         assert budget.available() == 500
+
+
+from amplify_media_migrator.migration.concurrency import ConcurrencyController
+
+
+def _controller(initial: int = 10, lo: int = 4, hi: int = 50) -> ConcurrencyController:
+    return ConcurrencyController(min_workers=lo, max_workers=hi, initial=initial)
+
+
+class TestControllerStep:
+    def test_error_halves_limit(self) -> None:
+        c = _controller(initial=20)
+        c.step(errors=1, throughput=1000.0)
+        assert c.current_limit() == 10
+
+    def test_error_never_below_min(self) -> None:
+        c = _controller(initial=6, lo=4)
+        c.step(errors=3, throughput=0.0)
+        assert c.current_limit() == 4
+
+    def test_increase_when_throughput_climbs(self) -> None:
+        c = _controller(initial=10)
+        c.step(errors=0, throughput=1000.0)  # establishes baseline, +2
+        c.step(errors=0, throughput=2000.0)  # climbing, +2
+        assert c.current_limit() == 14
+
+    def test_plateau_steps_down(self) -> None:
+        c = _controller(initial=20)
+        c.step(errors=0, throughput=1000.0)  # baseline, +2 -> 22
+        c.step(errors=0, throughput=1000.0)  # flat -> -2 -> 20
+        assert c.current_limit() == 20
+
+    def test_throughput_drop_steps_back_up(self) -> None:
+        c = _controller(initial=20)
+        c.step(errors=0, throughput=2000.0)  # baseline -> 22
+        c.step(errors=0, throughput=1000.0)  # dropped >15% -> +2 -> 24
+        assert c.current_limit() == 24
+
+    def test_error_triggers_cooldown_blocking_increase(self) -> None:
+        c = _controller(initial=20)
+        c.step(errors=1, throughput=2000.0)  # -> 10, cooldown=3
+        c.step(errors=0, throughput=5000.0)  # cooldown, no increase
+        assert c.current_limit() == 10
+
+    def test_increase_capped_at_max(self) -> None:
+        c = _controller(initial=49, hi=50)
+        c.step(errors=0, throughput=1000.0)
+        c.step(errors=0, throughput=9000.0)
+        assert c.current_limit() == 50
+
+
+class TestControllerGate:
+    async def test_limit_blocks_excess_acquires(self) -> None:
+        c = _controller(initial=2, lo=1, hi=10)
+        await c.acquire()
+        await c.acquire()
+        third = asyncio.ensure_future(c.acquire())
+        await asyncio.sleep(0.02)
+        assert not third.done()
+        await c.release()
+        await asyncio.sleep(0.02)
+        assert third.done()
+        await third
+
+    async def test_raising_limit_wakes_parked_acquirer(self) -> None:
+        c = _controller(initial=1, lo=1, hi=10)
+        await c.acquire()
+        waiter = asyncio.ensure_future(c.acquire())
+        await asyncio.sleep(0.02)
+        assert not waiter.done()
+        c.step(errors=0, throughput=1000.0)  # baseline -> limit 3
+        await c.notify_waiters()
+        await asyncio.sleep(0.02)
+        assert waiter.done()
+        await waiter
