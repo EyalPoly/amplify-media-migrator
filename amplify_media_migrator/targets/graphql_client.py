@@ -124,6 +124,10 @@ class GraphQLClient:
         # A reset/aborted socket can be handed back from the pool on reuse.
         # Drop the thread-local session so the next call dials a fresh one
         # instead of retrying onto the same dead connection.
+        #
+        # self._local is read without _sessions_lock: it is per-thread storage,
+        # only ever reassigned by close(), which the engine invokes after all
+        # workers have finished — so no request is in flight concurrently here.
         session = getattr(self._local, "session", None)
         if session is None:
             return

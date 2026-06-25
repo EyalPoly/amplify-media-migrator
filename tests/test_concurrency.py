@@ -3,7 +3,11 @@ import threading
 
 import pytest
 
-from amplify_media_migrator.migration.concurrency import ThroughputMeter
+from amplify_media_migrator.migration.concurrency import (
+    ConcurrencyController,
+    InflightBudget,
+    ThroughputMeter,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -32,9 +36,6 @@ class TestThroughputMeter:
             t.join()
 
         assert m.total() == 8000
-
-
-from amplify_media_migrator.migration.concurrency import InflightBudget
 
 
 class TestInflightBudget:
@@ -67,9 +68,6 @@ class TestInflightBudget:
         async with budget.reserve(900):
             assert budget.available() == 0
         assert budget.available() == 500
-
-
-from amplify_media_migrator.migration.concurrency import ConcurrencyController
 
 
 def _controller(initial: int = 10, lo: int = 4, hi: int = 50) -> ConcurrencyController:
