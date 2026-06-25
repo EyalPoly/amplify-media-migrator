@@ -44,7 +44,7 @@ class AWSConfig:
 
 @dataclass
 class MigrationConfig:
-    concurrency: int = 50
+    max_workers: int = 50
     retry_attempts: int = 3
     retry_delay_seconds: int = 5
     chunk_size_mb: int = 8
@@ -74,8 +74,8 @@ class Config:
 
     def validate(self) -> None:
         errors: List[str] = []
-        if self.migration.concurrency <= 0:
-            errors.append("migration.concurrency must be > 0")
+        if self.migration.max_workers <= 0:
+            errors.append("migration.max_workers must be > 0")
         if self.migration.retry_attempts < 0:
             errors.append("migration.retry_attempts must be >= 0")
         if self.migration.retry_delay_seconds < 0:
@@ -84,8 +84,8 @@ class Config:
             errors.append("migration.chunk_size_mb must be > 0")
         if self.migration.min_workers < 1:
             errors.append("migration.min_workers must be >= 1")
-        if self.migration.min_workers > self.migration.concurrency:
-            errors.append("migration.min_workers must be <= migration.concurrency")
+        if self.migration.min_workers > self.migration.max_workers:
+            errors.append("migration.min_workers must be <= migration.max_workers")
         if (
             self.migration.initial_workers is not None
             and self.migration.initial_workers < 1
@@ -160,7 +160,9 @@ def config_from_dict(data: dict) -> Config:
     mig_data = data.get("migration", {})
     mig_defaults = MigrationConfig()
     migration = MigrationConfig(
-        concurrency=mig_data.get("concurrency", mig_defaults.concurrency),
+        max_workers=mig_data.get(
+            "max_workers", mig_data.get("concurrency", mig_defaults.max_workers)
+        ),
         retry_attempts=mig_data.get("retry_attempts", mig_defaults.retry_attempts),
         retry_delay_seconds=mig_data.get(
             "retry_delay_seconds", mig_defaults.retry_delay_seconds

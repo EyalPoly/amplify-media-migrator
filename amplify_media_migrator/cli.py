@@ -202,7 +202,7 @@ def _create_engine(
         region=cfg.get("aws.region"),
         identity_pool_id=cfg.get("aws.cognito.identity_pool_id"),
         user_pool_id=cfg.get("aws.cognito.user_pool_id"),
-        max_pool_connections=migration_cfg.concurrency,
+        max_pool_connections=migration_cfg.max_workers,
     )
     storage_client.connect(id_token)
 
@@ -252,7 +252,7 @@ def _create_engine(
         graphql_client=graphql_client,
         progress_tracker=ProgressTracker(),
         mapper=FilenameMapper(),
-        concurrency=migration_cfg.concurrency,
+        concurrency=migration_cfg.max_workers,
         retry_attempts=migration_cfg.retry_attempts,
         retry_delay_seconds=migration_cfg.retry_delay_seconds,
         default_media_public=migration_cfg.default_media_public,
@@ -405,7 +405,7 @@ def scan(folder_id: str) -> None:
         ),
         progress_tracker=ProgressTracker(),
         mapper=FilenameMapper(),
-        concurrency=cfg.config.migration.concurrency,
+        concurrency=cfg.config.migration.max_workers,
         adaptive=AdaptiveSettings(enabled=False),
     )
 

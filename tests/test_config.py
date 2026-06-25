@@ -43,7 +43,7 @@ def sample_config_dict():
             },
         },
         "migration": {
-            "concurrency": 5,
+            "max_workers": 5,
             "retry_attempts": 2,
             "retry_delay_seconds": 10,
             "chunk_size_mb": 16,
@@ -97,7 +97,7 @@ class TestConfigDataClasses:
 
     def test_migration_defaults(self):
         migration = MigrationConfig()
-        assert migration.concurrency == 50
+        assert migration.max_workers == 50
         assert migration.retry_attempts == 3
         assert migration.retry_delay_seconds == 5
         assert migration.chunk_size_mb == 8
@@ -111,13 +111,13 @@ class TestConfigDataClasses:
                 cognito=CognitoConfig(user_pool_id="pool_1"),
                 amplify=AmplifyConfig(storage_bucket="my-bucket"),
             ),
-            migration=MigrationConfig(concurrency=20),
+            migration=MigrationConfig(max_workers=20),
         )
         assert config.google_drive.folder_id == "abc"
         assert config.aws.region == "us-west-2"
         assert config.aws.cognito.user_pool_id == "pool_1"
         assert config.aws.amplify.storage_bucket == "my-bucket"
-        assert config.migration.concurrency == 20
+        assert config.migration.max_workers == 20
 
 
 class TestConfigSerialization:
@@ -125,12 +125,12 @@ class TestConfigSerialization:
         config = Config(
             google_drive=GoogleDriveConfig(folder_id="folder_123"),
             aws=AWSConfig(region="ap-southeast-1"),
-            migration=MigrationConfig(concurrency=15),
+            migration=MigrationConfig(max_workers=15),
         )
         result = config_to_dict(config)
         assert result["google_drive"]["folder_id"] == "folder_123"
         assert result["aws"]["region"] == "ap-southeast-1"
-        assert result["migration"]["concurrency"] == 15
+        assert result["migration"]["max_workers"] == 15
         assert "cognito" in result["aws"]
         assert "amplify" in result["aws"]
 
@@ -160,7 +160,7 @@ class TestConfigSerialization:
             config.google_drive.credentials_path
             == "~/.amplify-media-migrator/google_credentials.json"
         )
-        assert config.migration.concurrency == 50
+        assert config.migration.max_workers == 50
         assert config.aws.cognito.user_pool_id == ""
 
 
@@ -169,13 +169,13 @@ class TestConfigValidation:
         config = Config()
         validate_config(config)
 
-    def test_concurrency_zero_fails(self):
-        config = Config(migration=MigrationConfig(concurrency=0))
+    def test_max_workers_zero_fails(self):
+        config = Config(migration=MigrationConfig(max_workers=0))
         with pytest.raises(ConfigurationError):
             validate_config(config)
 
-    def test_concurrency_negative_fails(self):
-        config = Config(migration=MigrationConfig(concurrency=-1))
+    def test_max_workers_negative_fails(self):
+        config = Config(migration=MigrationConfig(max_workers=-1))
         with pytest.raises(ConfigurationError):
             validate_config(config)
 
@@ -200,8 +200,8 @@ class TestConfigValidation:
             validate_config(config)
 
     def test_error_message_is_descriptive(self):
-        config = Config(migration=MigrationConfig(concurrency=-1))
-        with pytest.raises(ConfigurationError, match="concurrency"):
+        config = Config(migration=MigrationConfig(max_workers=-1))
+        with pytest.raises(ConfigurationError, match="max_workers"):
             validate_config(config)
 
 
@@ -246,8 +246,8 @@ class TestConfigManagerFileOps:
         )
         assert config.aws.region == sample_config_dict["aws"]["region"]
         assert (
-            config.migration.concurrency
-            == sample_config_dict["migration"]["concurrency"]
+            config.migration.max_workers
+            == sample_config_dict["migration"]["max_workers"]
         )
 
     def test_load_raises_on_missing_file(self, tmp_path):
@@ -268,14 +268,14 @@ class TestConfigManagerFileOps:
         _ = mgr1.config
         mgr1.config.google_drive.folder_id = "roundtrip_folder"
         mgr1.config.aws.region = "ap-northeast-1"
-        mgr1.config.migration.concurrency = 42
+        mgr1.config.migration.max_workers = 42
         mgr1.save()
 
         mgr2 = ConfigManager(config_path=path)
         config = mgr2.load()
         assert config.google_drive.folder_id == "roundtrip_folder"
         assert config.aws.region == "ap-northeast-1"
-        assert config.migration.concurrency == 42
+        assert config.migration.max_workers == 42
 
 
 class TestConfigManagerDotNotation:
@@ -309,8 +309,8 @@ class TestConfigManagerDotNotation:
 
     def test_update_is_alias_for_set(self, manager):
         manager.load()
-        manager.update("migration.concurrency", 99)
-        assert manager.get("migration.concurrency") == 99
+        manager.update("migration.max_workers", 99)
+        assert manager.get("migration.max_workers") == 99
 
 
 class TestConfigEnvOverrides:
@@ -378,7 +378,7 @@ class TestConfigManagerPrompts:
                         "amplify": {"api_endpoint": "", "storage_bucket": ""},
                     },
                     "migration": {
-                        "concurrency": 10,
+                        "max_workers": 10,
                         "retry_attempts": 3,
                         "retry_delay_seconds": 5,
                         "chunk_size_mb": 8,
@@ -417,7 +417,7 @@ class TestConfigManagerPrompts:
                         "amplify": {"api_endpoint": "", "storage_bucket": ""},
                     },
                     "migration": {
-                        "concurrency": 10,
+                        "max_workers": 10,
                         "retry_attempts": 3,
                         "retry_delay_seconds": 5,
                         "chunk_size_mb": 8,
@@ -445,19 +445,19 @@ class TestConfigManagerEdgeCases:
         mgr.save()
         assert path.exists()
         data = json.loads(path.read_text())
-        assert data["migration"]["concurrency"] == 50
+        assert data["migration"]["max_workers"] == 50
 
     def test_get_without_loaded_config_falls_back(self, tmp_path):
         path = tmp_path / "missing.json"
         mgr = ConfigManager(config_path=path)
-        result = mgr.get("migration.concurrency")
+        result = mgr.get("migration.max_workers")
         assert result == 50
 
     def test_set_without_loaded_config_falls_back(self, tmp_path):
         path = tmp_path / "missing.json"
         mgr = ConfigManager(config_path=path)
-        mgr.set("migration.concurrency", 42)
-        assert mgr.get("migration.concurrency") == 42
+        mgr.set("migration.max_workers", 42)
+        assert mgr.get("migration.max_workers") == 42
 
     def test_set_invalid_segment_raises(self, manager):
         manager.load()
@@ -484,7 +484,7 @@ class TestConfigManagerProperties:
         mgr = ConfigManager(config_path=Path("/tmp/nonexistent_for_test.json"))
         config = mgr.config
         assert isinstance(config, Config)
-        assert config.migration.concurrency == 50
+        assert config.migration.max_workers == 50
 
 
 def test_prefix_disambiguation_round_trip():
@@ -577,7 +577,15 @@ class TestAdaptiveConcurrencyConfig:
 
     def test_validate_rejects_min_above_max(self) -> None:
         cfg = Config()
-        cfg.migration.concurrency = 4
+        cfg.migration.max_workers = 4
         cfg.migration.min_workers = 8
         with pytest.raises(Exception):
             cfg.validate()
+
+    def test_legacy_concurrency_key_maps_to_max_workers(self) -> None:
+        cfg = config_from_dict({"migration": {"concurrency": 32}})
+        assert cfg.migration.max_workers == 32
+
+    def test_max_workers_key_wins_over_legacy_concurrency(self) -> None:
+        cfg = config_from_dict({"migration": {"max_workers": 16, "concurrency": 99}})
+        assert cfg.migration.max_workers == 16
