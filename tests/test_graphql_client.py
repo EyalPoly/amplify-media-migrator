@@ -649,3 +649,47 @@ class TestDiscriminatorLookup:
             client.get_all_observations_by_sequential_id(
                 5, discriminator_field="bad field!"
             )
+
+
+class TestConnectionResilience:
+    @patch("requests.Session.post")
+    def test_connection_error_resets_session(
+        self, mock_post: MagicMock, connected_client: GraphQLClient
+    ) -> None:
+        mock_post.side_effect = requests.exceptions.ConnectionError(
+            "('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer'))"
+        )
+        first_session = connected_client._get_session()
+
+        with pytest.raises(GraphQLError) as exc_info:
+            connected_client._execute("query { x }", operation="Probe")
+
+        assert exc_info.value.is_retryable is True
+        assert not hasattr(connected_client._local, "session")
+        assert first_session not in connected_client._all_sessions
+
+    @patch("requests.Session.post")
+    def test_connection_error_next_call_builds_fresh_session(
+        self, mock_post: MagicMock, connected_client: GraphQLClient
+    ) -> None:
+        mock_post.side_effect = requests.exceptions.ConnectionError("reset")
+        first_session = connected_client._get_session()
+
+        with pytest.raises(GraphQLError):
+            connected_client._execute("query { x }", operation="Probe")
+
+        second_session = connected_client._get_session()
+        assert second_session is not first_session
+
+    @patch("requests.Session.post")
+    def test_non_connection_request_error_does_not_reset(
+        self, mock_post: MagicMock, connected_client: GraphQLClient
+    ) -> None:
+        mock_post.side_effect = requests.exceptions.Timeout("read timeout")
+        first_session = connected_client._get_session()
+
+        with pytest.raises(GraphQLError) as exc_info:
+            connected_client._execute("query { x }", operation="Probe")
+
+        assert exc_info.value.is_retryable is True
+        assert connected_client._local.session is first_session
