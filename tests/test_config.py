@@ -48,6 +48,11 @@ def sample_config_dict():
             "retry_delay_seconds": 10,
             "chunk_size_mb": 16,
             "default_media_public": True,
+            "adaptive_concurrency": True,
+            "min_workers": 4,
+            "initial_workers": None,
+            "max_inflight_buffer_mb": 512,
+            "window_seconds": 10.0,
         },
         "prefix_disambiguation": {
             "enabled": False,
@@ -535,3 +540,44 @@ def test_prefix_disambiguation_rejects_multiple_catch_all():
     )
     with pytest.raises(ConfigurationError):
         cfg.validate()
+
+
+class TestAdaptiveConcurrencyConfig:
+    def test_defaults(self) -> None:
+        m = MigrationConfig()
+        assert m.adaptive_concurrency is True
+        assert m.min_workers == 4
+        assert m.initial_workers is None
+        assert m.max_inflight_buffer_mb == 512
+        assert m.window_seconds == 10.0
+
+    def test_from_dict_reads_adaptive_fields(self) -> None:
+        cfg = config_from_dict(
+            {
+                "migration": {
+                    "adaptive_concurrency": False,
+                    "min_workers": 2,
+                    "initial_workers": 8,
+                    "max_inflight_buffer_mb": 256,
+                    "window_seconds": 5.0,
+                }
+            }
+        )
+        assert cfg.migration.adaptive_concurrency is False
+        assert cfg.migration.min_workers == 2
+        assert cfg.migration.initial_workers == 8
+        assert cfg.migration.max_inflight_buffer_mb == 256
+        assert cfg.migration.window_seconds == 5.0
+
+    def test_validate_rejects_min_workers_below_one(self) -> None:
+        cfg = Config()
+        cfg.migration.min_workers = 0
+        with pytest.raises(Exception):
+            cfg.validate()
+
+    def test_validate_rejects_min_above_max(self) -> None:
+        cfg = Config()
+        cfg.migration.concurrency = 4
+        cfg.migration.min_workers = 8
+        with pytest.raises(Exception):
+            cfg.validate()
