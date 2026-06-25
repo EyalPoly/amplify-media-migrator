@@ -44,11 +44,16 @@ class AWSConfig:
 
 @dataclass
 class MigrationConfig:
-    concurrency: int = 50
+    max_workers: int = 50
     retry_attempts: int = 3
     retry_delay_seconds: int = 5
     chunk_size_mb: int = 8
     default_media_public: bool = False
+    adaptive_concurrency: bool = True
+    min_workers: int = 4
+    initial_workers: Optional[int] = None
+    max_inflight_buffer_mb: int = 512
+    window_seconds: float = 10.0
 
 
 @dataclass
@@ -69,14 +74,27 @@ class Config:
 
     def validate(self) -> None:
         errors: List[str] = []
-        if self.migration.concurrency <= 0:
-            errors.append("migration.concurrency must be > 0")
+        if self.migration.max_workers <= 0:
+            errors.append("migration.max_workers must be > 0")
         if self.migration.retry_attempts < 0:
             errors.append("migration.retry_attempts must be >= 0")
         if self.migration.retry_delay_seconds < 0:
             errors.append("migration.retry_delay_seconds must be >= 0")
         if self.migration.chunk_size_mb <= 0:
             errors.append("migration.chunk_size_mb must be > 0")
+        if self.migration.min_workers < 1:
+            errors.append("migration.min_workers must be >= 1")
+        if self.migration.min_workers > self.migration.max_workers:
+            errors.append("migration.min_workers must be <= migration.max_workers")
+        if (
+            self.migration.initial_workers is not None
+            and self.migration.initial_workers < 1
+        ):
+            errors.append("migration.initial_workers must be >= 1 when set")
+        if self.migration.max_inflight_buffer_mb <= 0:
+            errors.append("migration.max_inflight_buffer_mb must be > 0")
+        if self.migration.window_seconds <= 0:
+            errors.append("migration.window_seconds must be > 0")
         pd = self.prefix_disambiguation
         if pd.enabled:
             if not pd.discriminator_field:
@@ -142,7 +160,9 @@ def config_from_dict(data: dict) -> Config:
     mig_data = data.get("migration", {})
     mig_defaults = MigrationConfig()
     migration = MigrationConfig(
-        concurrency=mig_data.get("concurrency", mig_defaults.concurrency),
+        max_workers=mig_data.get(
+            "max_workers", mig_data.get("concurrency", mig_defaults.max_workers)
+        ),
         retry_attempts=mig_data.get("retry_attempts", mig_defaults.retry_attempts),
         retry_delay_seconds=mig_data.get(
             "retry_delay_seconds", mig_defaults.retry_delay_seconds
@@ -151,6 +171,15 @@ def config_from_dict(data: dict) -> Config:
         default_media_public=mig_data.get(
             "default_media_public", mig_defaults.default_media_public
         ),
+        adaptive_concurrency=mig_data.get(
+            "adaptive_concurrency", mig_defaults.adaptive_concurrency
+        ),
+        min_workers=mig_data.get("min_workers", mig_defaults.min_workers),
+        initial_workers=mig_data.get("initial_workers", mig_defaults.initial_workers),
+        max_inflight_buffer_mb=mig_data.get(
+            "max_inflight_buffer_mb", mig_defaults.max_inflight_buffer_mb
+        ),
+        window_seconds=mig_data.get("window_seconds", mig_defaults.window_seconds),
     )
 
     pd_data = data.get("prefix_disambiguation", {})

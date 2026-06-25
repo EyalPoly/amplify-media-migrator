@@ -65,6 +65,7 @@ class LiveReporter:
         self._active: Dict[str, _FileState] = {}
         self._global_rate = RollingRate(clock=clock)
         self._start = clock()
+        self._current_limit = 0
 
     def on_total(self, total_files: int, total_bytes: int) -> None:
         with self._lock:
@@ -104,6 +105,10 @@ class LiveReporter:
             ):
                 self._completed_bytes += state.size
 
+    def on_concurrency(self, limit: int) -> None:
+        with self._lock:
+            self._current_limit = limit
+
     def _global_done_locked(self) -> int:
         live = sum(
             s.bytes_done for s in self._active.values() if s.phase == _GLOBAL_PHASE
@@ -136,7 +141,9 @@ class LiveReporter:
             eta = self._eta(done, total)
             elapsed = self._clock() - self._start
             n_active = len(self._active)
+            limit = self._current_limit
         pct = (done / total * 100) if total else 0.0
+        workers_suffix = f" · {limit} workers" if limit else ""
 
         header = Table.grid(padding=(0, 1))
         header.add_row(
@@ -157,6 +164,7 @@ class LiveReporter:
             f"orphan {counts.get('orphan', 0)}  "
             f"review {counts.get('needs_review', 0)}       "
             f"elapsed {format_duration(elapsed)} · {n_active} active"
+            f"{workers_suffix}"
         )
 
         renderables: List[RenderableType] = [header, counts_line]

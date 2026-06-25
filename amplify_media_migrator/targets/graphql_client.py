@@ -120,6 +120,26 @@ class GraphQLClient:
         for session in sessions:
             session.close()
 
+    def _reset_session(self) -> None:
+        # A reset/aborted socket can be handed back from the pool on reuse.
+        # Drop the thread-local session so the next call dials a fresh one
+        # instead of retrying onto the same dead connection.
+        #
+        # self._local is read without _sessions_lock: it is per-thread storage,
+        # only ever reassigned by close(), which the engine invokes after all
+        # workers have finished — so no request is in flight concurrently here.
+        session = getattr(self._local, "session", None)
+        if session is None:
+            return
+        with self._sessions_lock:
+            if session in self._all_sessions:
+                self._all_sessions.remove(session)
+        try:
+            session.close()
+        finally:
+            if hasattr(self._local, "session"):
+                del self._local.session
+
     def connect(self, id_token: str) -> None:
         self._id_token = id_token
         logger.info("GraphQL client connected with auth token")
@@ -178,6 +198,13 @@ class GraphQLClient:
                 json=payload,
                 timeout=30,
             )
+        except requests.exceptions.ConnectionError as e:
+            self._reset_session()
+            raise GraphQLError(
+                f"GraphQL request failed: {e}",
+                operation=operation,
+                is_retryable=True,
+            ) from e
         except requests.exceptions.RequestException as e:
             raise GraphQLError(
                 f"GraphQL request failed: {e}",

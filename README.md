@@ -244,7 +244,7 @@ for a `sequentialId` (legacy behaviour).
 | "User not in ADMINS group" | Add the user to ADMINS in the Cognito console |
 | "S3 bucket not found" | Deploy Amplify storage first |
 | "Observation not found" | Verify the sequentialId exists, check the filename pattern |
-| "Rate limit exceeded" | Reduce `migration.concurrency` in config |
+| "Rate limit exceeded" | Reduce `migration.max_workers` in config |
 
 ## Development
 

@@ -4,6 +4,7 @@ from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
+from amplify_media_migrator.migration.concurrency import AdaptiveSettings
 from amplify_media_migrator.migration.engine import MigrationEngine
 from amplify_media_migrator.migration.mapper import (
     FilenameMapper,
@@ -1604,6 +1605,9 @@ class FakeReporter:
     def on_file_done(self, file_id: str, status: FileStatus) -> None:
         self.events.append(("done", file_id, status))
 
+    def on_concurrency(self, limit: int) -> None:
+        self.events.append(("concurrency", limit))
+
 
 class TestProgressReporter:
     def test_done_emitted_on_completion(
@@ -2409,3 +2413,66 @@ class TestSelectByPrefix:
         cands = [Observation("o3", 5, "c-egypt"), Observation("o4", 5, "c-jordan")]
         with pytest.raises(MigratorError):
             MigrationEngine._select_by_prefix(cands, "S", self.PREFIXES)
+
+
+def _engine_basic(
+    adaptive: bool = True,
+    concurrency: int = 4,
+    initial: Optional[int] = None,
+    min_workers: int = 4,
+) -> MigrationEngine:
+    return MigrationEngine(
+        drive_client=MagicMock(spec=GoogleDriveClient),
+        storage_client=MagicMock(spec=AmplifyStorageClient),
+        graphql_client=MagicMock(spec=GraphQLClient),
+        progress_tracker=ProgressTracker(),
+        mapper=FilenameMapper(),
+        concurrency=concurrency,
+        retry_attempts=1,
+        retry_delay_seconds=0,
+        adaptive=AdaptiveSettings(
+            enabled=adaptive, min_workers=min_workers, initial_workers=initial
+        ),
+    )
+
+
+def _engine_with_concurrency(initial: int, files: int) -> MigrationEngine:
+    return _engine_basic(
+        adaptive=True,
+        concurrency=max(initial, 4),
+        initial=initial,
+        min_workers=min(initial, 4),
+    )
+
+
+class TestAdaptiveEngine:
+    async def test_gate_caps_in_flight_workers(self) -> None:
+        engine = _engine_with_concurrency(initial=2, files=8)
+        assert engine._controller is not None
+        assert engine._controller.current_limit() == 2
+
+    def test_disabled_leaves_controller_none(self) -> None:
+        engine = _engine_basic(adaptive=False)
+        assert engine._controller is None
+
+    def test_initial_workers_defaults_to_half_max(self) -> None:
+        engine = _engine_basic(adaptive=True, concurrency=20, initial=None)
+        assert engine._controller is not None
+        assert engine._controller.current_limit() == 10
+
+    async def test_retryable_media_error_is_recorded(self) -> None:
+        engine = _engine_basic(adaptive=True)
+        assert engine._controller is not None
+        before = engine._controller._errors_since_window
+        with patch.object(
+            engine._graphql_client,
+            "create_media",
+            side_effect=GraphQLError(
+                "reset", operation="CreateMedia", is_retryable=True
+            ),
+        ):
+            with pytest.raises(GraphQLError):
+                await engine._create_media_with_retry(
+                    "https://x/y.jpg", "obs-1", MediaType.IMAGE, False
+                )
+        assert engine._controller._errors_since_window > before

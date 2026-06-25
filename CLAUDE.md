@@ -169,7 +169,7 @@ Examples:
     }
   },
   "migration": {
-    "concurrency": 100,
+    "max_workers": 100,
     "retry_attempts": 3,
     "retry_delay_seconds": 5,
     "chunk_size_mb": 8,
@@ -648,7 +648,7 @@ export LOG_LEVEL=DEBUG
 | "User not in ADMINS group" | Add user to ADMINS in Cognito console |
 | "S3 bucket not found" | Deploy Amplify storage first (`npx ampx sandbox`) |
 | "Observation not found" | Verify sequentialId exists, check filename pattern |
-| "Rate limit exceeded" | Reduce `migration.concurrency` in config |
+| "Rate limit exceeded" | Reduce `migration.max_workers` in config |
 
 ---
 

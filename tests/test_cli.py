@@ -61,7 +61,7 @@ def sample_config_dict() -> dict:
             },
         },
         "migration": {
-            "concurrency": 10,
+            "max_workers": 10,
             "retry_attempts": 3,
             "retry_delay_seconds": 5,
             "chunk_size_mb": 8,
@@ -341,7 +341,7 @@ class TestCreateEngine:
             "aws.cognito.user_pool_id": "user-pool",
             "aws.amplify.api_endpoint": "https://test.api.com/graphql",
         }[key]
-        mock_cfg.config = Config(migration=MigrationConfig(concurrency=5))
+        mock_cfg.config = Config(migration=MigrationConfig(max_workers=5))
 
         with patch(
             "amplify_media_migrator.cli.AmplifyStorageClient"
@@ -359,6 +359,52 @@ class TestCreateEngine:
             mock_storage.connect.assert_called_once_with("token")
             mock_gql.connect.assert_called_once_with("token")
 
+    def test_passes_adaptive_settings_from_config(self) -> None:
+        mock_cfg = MagicMock()
+        mock_cfg.get.side_effect = lambda key: {
+            "aws.amplify.storage_bucket": "test-bucket",
+            "aws.region": "us-east-1",
+            "aws.cognito.identity_pool_id": "pool-id",
+            "aws.cognito.user_pool_id": "user-pool",
+            "aws.amplify.api_endpoint": "https://test.api.com/graphql",
+        }[key]
+        mock_cfg.config = Config(
+            migration=MigrationConfig(
+                max_workers=20,
+                adaptive_concurrency=True,
+                min_workers=3,
+                initial_workers=8,
+                max_inflight_buffer_mb=128,
+            )
+        )
+
+        with patch("amplify_media_migrator.cli.AmplifyStorageClient"), patch(
+            "amplify_media_migrator.cli.GraphQLClient"
+        ):
+            engine = _create_engine(mock_cfg, MagicMock(), "token")
+
+        assert engine._controller is not None
+        assert engine._controller.current_limit() == 8
+        assert engine._inflight_budget.available() == 128 * 1024 * 1024
+
+    def test_disabled_adaptive_leaves_controller_none(self) -> None:
+        mock_cfg = MagicMock()
+        mock_cfg.get.side_effect = lambda key: {
+            "aws.amplify.storage_bucket": "test-bucket",
+            "aws.region": "us-east-1",
+            "aws.cognito.identity_pool_id": "pool-id",
+            "aws.cognito.user_pool_id": "user-pool",
+            "aws.amplify.api_endpoint": "https://test.api.com/graphql",
+        }[key]
+        mock_cfg.config = Config(migration=MigrationConfig(adaptive_concurrency=False))
+
+        with patch("amplify_media_migrator.cli.AmplifyStorageClient"), patch(
+            "amplify_media_migrator.cli.GraphQLClient"
+        ):
+            engine = _create_engine(mock_cfg, MagicMock(), "token")
+
+        assert engine._controller is None
+
     def test_creates_token_manager_with_real_refresh(self) -> None:
         mock_cfg = MagicMock()
         mock_cfg.get.side_effect = lambda key: {
@@ -368,7 +414,7 @@ class TestCreateEngine:
             "aws.cognito.user_pool_id": "user-pool",
             "aws.amplify.api_endpoint": "https://test.api.com/graphql",
         }[key]
-        mock_cfg.config = Config(migration=MigrationConfig(concurrency=5))
+        mock_cfg.config = Config(migration=MigrationConfig(max_workers=5))
 
         mock_cognito_provider = MagicMock()
         mock_cognito_client = MagicMock()
@@ -398,7 +444,7 @@ class TestCreateEngine:
             "aws.cognito.user_pool_id": "user-pool",
             "aws.amplify.api_endpoint": "https://test.api.com/graphql",
         }[key]
-        mock_cfg.config = Config(migration=MigrationConfig(concurrency=5))
+        mock_cfg.config = Config(migration=MigrationConfig(max_workers=5))
 
         with patch("amplify_media_migrator.cli.AmplifyStorageClient"), patch(
             "amplify_media_migrator.cli.GraphQLClient"
