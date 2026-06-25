@@ -32,3 +32,38 @@ class TestThroughputMeter:
             t.join()
 
         assert m.total() == 8000
+
+
+from amplify_media_migrator.migration.concurrency import InflightBudget
+
+
+class TestInflightBudget:
+    async def test_reserve_reduces_available(self) -> None:
+        budget = InflightBudget(1000)
+        async with budget.reserve(400):
+            assert budget.available() == 600
+        assert budget.available() == 1000
+
+    async def test_over_budget_reservation_parks_until_release(self) -> None:
+        budget = InflightBudget(1000)
+        order: list[str] = []
+
+        async def big() -> None:
+            async with budget.reserve(800):
+                order.append("big-acquired")
+                await asyncio.sleep(0.05)
+            order.append("big-released")
+
+        async def second() -> None:
+            await asyncio.sleep(0.01)
+            async with budget.reserve(800):
+                order.append("second-acquired")
+
+        await asyncio.gather(big(), second())
+        assert order == ["big-acquired", "big-released", "second-acquired"]
+
+    async def test_reservation_larger_than_budget_is_capped(self) -> None:
+        budget = InflightBudget(500)
+        async with budget.reserve(900):
+            assert budget.available() == 0
+        assert budget.available() == 500
