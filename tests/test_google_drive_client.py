@@ -231,6 +231,45 @@ class TestListFiles:
         assert len(files) == 1
         assert files[0].name == "photo.jpg"
 
+    def test_populates_checksum(
+        self, connected_client: GoogleDriveClient, mock_service: MagicMock
+    ) -> None:
+        mock_service.files().list().execute.return_value = {
+            "files": [
+                {
+                    "id": "file1",
+                    "name": "6602.jpg",
+                    "mimeType": "image/jpeg",
+                    "size": "1024",
+                    "parents": ["folder1"],
+                    "md5Checksum": "abc123",
+                }
+            ],
+        }
+
+        files = list(connected_client.list_files("folder1", recursive=False))
+
+        assert files[0].checksum == "abc123"
+
+    def test_checksum_none_when_absent(
+        self, connected_client: GoogleDriveClient, mock_service: MagicMock
+    ) -> None:
+        mock_service.files().list().execute.return_value = {
+            "files": [
+                {
+                    "id": "file1",
+                    "name": "6602.jpg",
+                    "mimeType": "image/jpeg",
+                    "size": "1024",
+                    "parents": ["folder1"],
+                }
+            ],
+        }
+
+        files = list(connected_client.list_files("folder1", recursive=False))
+
+        assert files[0].checksum is None
+
     def test_empty_folder(
         self, connected_client: GoogleDriveClient, mock_service: MagicMock
     ) -> None:
@@ -406,6 +445,22 @@ class TestGetFileMetadata:
         result = connected_client.get_file_metadata("file1")
 
         assert result.parent_id is None
+
+    def test_populates_checksum(
+        self, connected_client: GoogleDriveClient, mock_service: MagicMock
+    ) -> None:
+        mock_service.files().get().execute.return_value = {
+            "id": "file1",
+            "name": "photo.jpg",
+            "mimeType": "image/jpeg",
+            "size": "2048",
+            "parents": ["folder1"],
+            "md5Checksum": "def456",
+        }
+
+        result = connected_client.get_file_metadata("file1")
+
+        assert result.checksum == "def456"
 
     def test_404_raises_download_error(
         self, connected_client: GoogleDriveClient, mock_service: MagicMock

@@ -33,6 +33,7 @@ class DriveFile:
     mime_type: str
     size: int
     parent_id: Optional[str] = None
+    checksum: Optional[str] = None
 
 
 class GoogleDriveClient:
@@ -110,7 +111,10 @@ class GoogleDriveClient:
             try:
                 request_kwargs: Dict[str, Any] = {
                     "q": query,
-                    "fields": "nextPageToken, files(id, name, mimeType, size, parents)",
+                    "fields": (
+                        "nextPageToken, "
+                        "files(id, name, mimeType, size, parents, md5Checksum)"
+                    ),
                     "pageSize": 1000,
                     "supportsAllDrives": True,
                     "includeItemsFromAllDrives": True,
@@ -140,6 +144,7 @@ class GoogleDriveClient:
                     mime_type=mime_type,
                     size=int(file_data.get("size", 0)),
                     parent_id=parents[0] if parents else None,
+                    checksum=file_data.get("md5Checksum"),
                 )
 
             page_token = response.get("nextPageToken")
@@ -221,7 +226,7 @@ class GoogleDriveClient:
                 service.files()
                 .get(
                     fileId=file_id,
-                    fields="id,name,mimeType,size,parents",
+                    fields="id,name,mimeType,size,parents,md5Checksum",
                     supportsAllDrives=True,
                 )
                 .execute()
@@ -236,6 +241,7 @@ class GoogleDriveClient:
             mime_type=result.get("mimeType", ""),
             size=int(result.get("size", 0)),
             parent_id=parents[0] if parents else None,
+            checksum=result.get("md5Checksum"),
         )
 
     def get_folder_name(self, folder_id: str) -> str:
