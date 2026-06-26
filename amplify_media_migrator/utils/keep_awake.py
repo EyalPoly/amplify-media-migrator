@@ -84,6 +84,8 @@ def _start_linux(reason: str) -> subprocess.Popen:
 
 
 def _start_windows() -> str:
+    # SetThreadExecutionState is per-thread: the flags must be set and cleared on
+    # the same thread. migrate enters and exits this context on the main thread.
     ctypes.windll.kernel32.SetThreadExecutionState(  # type: ignore[attr-defined]
         _ES_CONTINUOUS | _ES_SYSTEM_REQUIRED | _ES_DISPLAY_REQUIRED
     )
@@ -97,3 +99,7 @@ def _stop(handle: Optional[object]) -> None:
         ctypes.windll.kernel32.SetThreadExecutionState(_ES_CONTINUOUS)  # type: ignore[attr-defined]
         return
     handle.terminate()  # type: ignore[attr-defined]
+    try:
+        handle.wait(timeout=5)  # type: ignore[attr-defined]  # reap the child so it never zombies
+    except subprocess.TimeoutExpired:
+        handle.kill()  # type: ignore[attr-defined]
