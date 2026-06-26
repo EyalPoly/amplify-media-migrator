@@ -956,3 +956,33 @@ class TestStatusCommand:
         result = runner.invoke(main, ["status"])
         assert result.exit_code != 0
         assert "Missing option" in result.output or "required" in result.output.lower()
+
+
+class TestMigrateKeepAwake:
+    @patch("amplify_media_migrator.cli.KeepAwake")
+    @patch("amplify_media_migrator.cli._run_with_progress")
+    @patch("amplify_media_migrator.cli._create_engine")
+    @patch("amplify_media_migrator.cli._authenticate_cognito")
+    @patch("amplify_media_migrator.cli._authenticate_google")
+    @patch("amplify_media_migrator.cli._load_config")
+    @patch("amplify_media_migrator.cli.ProgressTracker")
+    def test_keep_awake_used_by_default(
+        self,
+        mock_tracker_cls: MagicMock,
+        mock_load: MagicMock,
+        mock_google: MagicMock,
+        mock_cognito: MagicMock,
+        mock_engine: MagicMock,
+        mock_run: MagicMock,
+        mock_keep_awake: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        mock_cognito.return_value = (MagicMock(), MagicMock())
+        mock_tracker_cls.return_value.load.return_value = False
+        mock_engine.return_value.get_summary.return_value = MagicMock(
+            completed=0, failed=0, orphan=0, needs_review=0, partial=0
+        )
+        result = runner.invoke(migrate, ["--folder-id", "F1"])
+        assert result.exit_code == 0
+        mock_keep_awake.assert_called_once()
+        mock_keep_awake.return_value.__enter__.assert_called_once()
