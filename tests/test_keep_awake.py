@@ -21,6 +21,7 @@ def test_macos_spawns_caffeinate(mock_getpid, mock_popen, mock_system):
     assert kwargs["stdout"] == subprocess.DEVNULL
     assert kwargs["stderr"] == subprocess.DEVNULL
     handle.terminate.assert_called_once()
+    handle.wait.assert_called_once()
 
 
 @patch("amplify_media_migrator.utils.keep_awake.platform.system", return_value="Linux")
