@@ -2,6 +2,7 @@ import asyncio
 import concurrent.futures
 import logging
 import random
+import re
 import threading
 from typing import Callable, Dict, List, Optional
 
@@ -29,6 +30,8 @@ from .progress import FileStatus, ProgressTracker
 from .reporter import NullReporter, ProgressReporter
 
 logger = logging.getLogger(__name__)
+
+_COPY_SUFFIX_RE = re.compile(r"\s\(\d+\)|\s-\s*copy", re.IGNORECASE)
 
 
 class MigrationEngine:
@@ -143,6 +146,7 @@ class MigrationEngine:
                     status=FileStatus.PENDING,
                     sequential_ids=parsed.sequential_ids,
                     size=drive_file.size,
+                    checksum=drive_file.checksum,
                 )
 
         self._progress.save()
@@ -168,6 +172,8 @@ class MigrationEngine:
             )
         else:
             files_to_process = await self._build_work_from_progress(retry_orphans)
+
+        files_to_process = self._dedup_by_checksum(files_to_process)
 
         total_bytes = sum(f.size for f in files_to_process)
         self._reporter.on_total(len(files_to_process), total_bytes)
@@ -222,6 +228,7 @@ class MigrationEngine:
                     status=FileStatus.PENDING,
                     sequential_ids=parsed.sequential_ids,
                     size=drive_file.size,
+                    checksum=drive_file.checksum,
                 )
 
         self._requeue_as_pending(self._collect_retryable_ids(retry_orphans))
@@ -248,7 +255,13 @@ class MigrationEngine:
                 )
                 continue
             files_to_process.append(
-                DriveFile(id=file_id, name=fp.filename, mime_type="", size=fp.size)
+                DriveFile(
+                    id=file_id,
+                    name=fp.filename,
+                    mime_type="",
+                    size=fp.size,
+                    checksum=fp.checksum,
+                )
             )
 
         if needs_review_ids:
@@ -264,6 +277,60 @@ class MigrationEngine:
                     files_to_process.append(drive_file)
 
         return files_to_process
+
+    @staticmethod
+    def _dedup_sort_key(name: str) -> tuple:
+        has_copy_suffix = bool(_COPY_SUFFIX_RE.search(name))
+        return (has_copy_suffix, len(name), name)
+
+    def _dedup_by_checksum(self, files: List[DriveFile]) -> List[DriveFile]:
+        parsed_by_id = {f.id: self._mapper.parse(f.name) for f in files}
+
+        def dedupable(f: DriveFile) -> bool:
+            return bool(f.checksum) and (
+                parsed_by_id[f.id].pattern != FilenamePattern.INVALID
+            )
+
+        def key_of(f: DriveFile) -> tuple:
+            return (f.checksum, frozenset(parsed_by_id[f.id].sequential_ids))
+
+        claimed: Dict[tuple, str] = {}
+        for fp in self._progress.files.values():
+            if fp.status == FileStatus.COMPLETED and fp.checksum and fp.sequential_ids:
+                claimed.setdefault(
+                    (fp.checksum, frozenset(fp.sequential_ids)), fp.filename
+                )
+
+        groups: Dict[tuple, List[DriveFile]] = {}
+        for f in files:
+            if dedupable(f):
+                groups.setdefault(key_of(f), []).append(f)
+
+        canonical_ids: set[str] = set()
+        for key, group in groups.items():
+            if key in claimed:
+                continue
+            winner = min(group, key=lambda f: self._dedup_sort_key(f.name))
+            canonical_ids.add(winner.id)
+            claimed[key] = winner.name
+
+        kept: List[DriveFile] = []
+        for f in files:
+            if not dedupable(f) or f.id in canonical_ids:
+                kept.append(f)
+                continue
+            parsed = parsed_by_id[f.id]
+            self._progress.update_file(
+                file_id=f.id,
+                filename=f.name,
+                status=FileStatus.DUPLICATE,
+                sequential_ids=parsed.sequential_ids,
+                checksum=f.checksum,
+                error=f"Duplicate of {claimed[key_of(f)]}",
+            )
+            self._reporter.on_file_done(f.id, FileStatus.DUPLICATE)
+
+        return kept
 
     async def _process_files(
         self, files_to_process: List[DriveFile], dry_run: bool

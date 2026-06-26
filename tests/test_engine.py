@@ -2476,3 +2476,75 @@ class TestAdaptiveEngine:
                     "https://x/y.jpg", "obs-1", MediaType.IMAGE, False
                 )
         assert engine._controller._errors_since_window > before
+
+
+class TestDedupByChecksum:
+    def test_identical_checksum_and_seq_ids_is_deduped(
+        self, engine: MigrationEngine
+    ) -> None:
+        files = [
+            DriveFile("f1", "1953-A.jpg", "image/jpeg", 10, checksum="X"),
+            DriveFile("f2", "1953-A (1).jpg", "image/jpeg", 10, checksum="X"),
+        ]
+        result = engine._dedup_by_checksum(files)
+        assert [f.id for f in result] == ["f1"]
+        dup = engine._progress.get_file("f2")
+        assert dup is not None
+        assert dup.status == FileStatus.DUPLICATE
+        assert dup.error == "Duplicate of 1953-A.jpg"
+
+    def test_cleanest_name_wins_regardless_of_order(
+        self, engine: MigrationEngine
+    ) -> None:
+        files = [
+            DriveFile("f2", "1953-A (1).jpg", "image/jpeg", 10, checksum="X"),
+            DriveFile("f1", "1953-A.jpg", "image/jpeg", 10, checksum="X"),
+        ]
+        result = engine._dedup_by_checksum(files)
+        assert [f.id for f in result] == ["f1"]
+        dup = engine._progress.get_file("f2")
+        assert dup is not None
+        assert dup.status == FileStatus.DUPLICATE
+
+    def test_same_checksum_different_seq_ids_not_deduped(
+        self, engine: MigrationEngine
+    ) -> None:
+        files = [
+            DriveFile("f1", "1953.jpg", "image/jpeg", 10, checksum="X"),
+            DriveFile("f2", "2000.jpg", "image/jpeg", 10, checksum="X"),
+        ]
+        result = engine._dedup_by_checksum(files)
+        assert [f.id for f in result] == ["f1", "f2"]
+
+    def test_missing_checksum_never_deduped(self, engine: MigrationEngine) -> None:
+        files = [
+            DriveFile("f1", "1953-A.jpg", "image/jpeg", 10, checksum=None),
+            DriveFile("f2", "1953-A (1).jpg", "image/jpeg", 10, checksum=None),
+        ]
+        result = engine._dedup_by_checksum(files)
+        assert [f.id for f in result] == ["f1", "f2"]
+
+    def test_dedup_against_already_completed(self, engine: MigrationEngine) -> None:
+        engine._progress.update_file(
+            file_id="done",
+            filename="1953-A.jpg",
+            status=FileStatus.COMPLETED,
+            sequential_ids=[1953],
+            checksum="X",
+        )
+        files = [
+            DriveFile("f2", "1953-A (1).jpg", "image/jpeg", 10, checksum="X"),
+        ]
+        result = engine._dedup_by_checksum(files)
+        assert result == []
+        dup = engine._progress.get_file("f2")
+        assert dup is not None
+        assert dup.status == FileStatus.DUPLICATE
+
+    def test_dedup_sort_key_orders_clean_before_copy(self) -> None:
+        assert MigrationEngine._dedup_sort_key(
+            "1953-A.jpg"
+        ) < MigrationEngine._dedup_sort_key("1953-A (1).jpg")
+        assert MigrationEngine._dedup_sort_key(
+            "1953-A.jpg"
+        ) < MigrationEngine._dedup_sort_key("1953-A - Copy.jpg")
