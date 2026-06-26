@@ -165,6 +165,24 @@ amplify-media-migrator migrate --folder-id FOLDER_ID --retry-orphans
 
 Use `--dry-run` to validate without downloading or uploading.
 
+#### Keeping the machine awake
+
+`migrate` automatically prevents your machine from sleeping for the duration of
+the run, so a long migration keeps going when the screen turns off:
+
+- **macOS**: via `caffeinate` (covers display, idle, disk, and system sleep).
+- **Windows**: via `SetThreadExecutionState`.
+- **Linux**: via `systemd-inhibit` (requires systemd).
+
+This is always on and built in — there is no flag or config to disable it. If
+the mechanism is unavailable, migration logs a warning and runs anyway;
+progress autosaves and the run is resumable regardless.
+
+> **macOS clamshell caveat:** `caffeinate` cannot stop sleep when the laptop lid
+> is physically closed. Keep the lid open (the screen may turn off) for an
+> unattended run, or set `sudo pmset -c disablesleep 1` yourself (not done
+> automatically).
+
 ### 6. Check Status
 
 View migration progress (no auth required):
