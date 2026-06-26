@@ -908,4 +908,5 @@ class MigrationEngine:
             "orphan": summary.orphan,
             "needs_review": summary.needs_review,
             "partial": summary.partial,
+            "duplicate": summary.duplicate,
         }

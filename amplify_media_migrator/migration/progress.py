@@ -18,6 +18,7 @@ class FileStatus(Enum):
     ORPHAN = "orphan"
     NEEDS_REVIEW = "needs_review"
     PARTIAL = "partial"
+    DUPLICATE = "duplicate"
 
 
 @dataclass
@@ -44,6 +45,7 @@ class ProgressSummary:
     orphan: int = 0
     needs_review: int = 0
     partial: int = 0
+    duplicate: int = 0
 
 
 DEFAULT_PROGRESS_DIR = Path.home() / ".amplify-media-migrator"
@@ -257,6 +259,11 @@ class ProgressTracker:
             fid for fid, fp in self._files.items() if fp.status == FileStatus.ORPHAN
         ]
 
+    def get_duplicate_file_ids(self) -> List[str]:
+        return [
+            fid for fid, fp in self._files.items() if fp.status == FileStatus.DUPLICATE
+        ]
+
     def get_interrupted_file_ids(self) -> List[str]:
         """Return files stuck in transient mid-flight states from a killed run."""
         return [
@@ -285,4 +292,5 @@ class ProgressTracker:
             "orphan": summary.orphan,
             "needs_review": summary.needs_review,
             "partial": summary.partial,
+            "duplicate": summary.duplicate,
         }

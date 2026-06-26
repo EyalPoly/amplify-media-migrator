@@ -338,6 +338,7 @@ class TestBuildSummaryDict:
             "orphan",
             "needs_review",
             "partial",
+            "duplicate",
         }
         assert summary_dict["completed"] == 1
         assert summary_dict["failed"] == 1
@@ -436,6 +437,15 @@ class TestLoadFromFixture:
 
         partial_ids = tracker.get_partial_file_ids()
         assert partial_ids == ["file-partial-1"]
+
+
+def test_summary_counts_duplicates(tracker: ProgressTracker) -> None:
+    tracker.load("folder-1")
+    tracker.update_file(file_id="f1", filename="a.jpg", status=FileStatus.DUPLICATE)
+    tracker.update_file(file_id="f2", filename="b.jpg", status=FileStatus.DUPLICATE)
+    summary = tracker.get_summary()
+    assert summary.duplicate == 2
+    assert set(tracker.get_duplicate_file_ids()) == {"f1", "f2"}
 
 
 def test_update_file_stores_checksum(tracker: ProgressTracker) -> None:
