@@ -436,3 +436,34 @@ class TestLoadFromFixture:
 
         partial_ids = tracker.get_partial_file_ids()
         assert partial_ids == ["file-partial-1"]
+
+
+def test_update_file_stores_checksum(tracker: ProgressTracker) -> None:
+    tracker.load("folder-1")
+    tracker.update_file(
+        file_id="f1",
+        filename="6602.jpg",
+        status=FileStatus.PENDING,
+        checksum="abc123",
+    )
+    stored = tracker.get_file("f1")
+    assert stored is not None
+    assert stored.checksum == "abc123"
+
+
+def test_checksum_round_trips_through_save_load(tmp_path: Path) -> None:
+    tracker = ProgressTracker(progress_dir=tmp_path)
+    tracker.load("folder-1")
+    tracker.update_file(
+        file_id="f1",
+        filename="6602.jpg",
+        status=FileStatus.COMPLETED,
+        checksum="abc123",
+    )
+    tracker.save()
+
+    reloaded = ProgressTracker(progress_dir=tmp_path)
+    reloaded.load("folder-1")
+    restored = reloaded.get_file("f1")
+    assert restored is not None
+    assert restored.checksum == "abc123"

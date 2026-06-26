@@ -31,6 +31,7 @@ class FileProgress:
     error: Optional[str] = None
     updated_at: Optional[datetime] = None
     size: int = 0
+    checksum: Optional[str] = None
 
 
 @dataclass
@@ -59,6 +60,7 @@ def _file_progress_to_dict(fp: FileProgress) -> Dict[str, Any]:
         "error": fp.error,
         "updated_at": fp.updated_at.isoformat() if fp.updated_at else None,
         "size": fp.size,
+        "checksum": fp.checksum,
     }
 
 
@@ -76,6 +78,7 @@ def _file_progress_from_dict(data: Dict[str, Any]) -> FileProgress:
         error=data.get("error"),
         updated_at=updated_at,
         size=data.get("size", 0),
+        checksum=data.get("checksum"),
     )
 
 
@@ -181,6 +184,7 @@ class ProgressTracker:
         media_ids: Optional[List[str]] = None,
         error: Optional[str] = None,
         size: Optional[int] = None,
+        checksum: Optional[str] = None,
     ) -> None:
         existing = self._files.get(file_id)
         if existing:
@@ -195,6 +199,8 @@ class ProgressTracker:
                 existing.media_ids = media_ids
             if size is not None:
                 existing.size = size
+            if checksum is not None:
+                existing.checksum = checksum
             existing.error = error
             existing.updated_at = datetime.now(timezone.utc)
         else:
@@ -208,6 +214,7 @@ class ProgressTracker:
                 error=error,
                 updated_at=datetime.now(timezone.utc),
                 size=size or 0,
+                checksum=checksum,
             )
 
     def get_file(self, file_id: str) -> Optional[FileProgress]:
