@@ -439,6 +439,32 @@ class TestGetUrl:
             url == "https://eu-bucket.s3.eu-west-1.amazonaws.com/media/obs-1/photo.jpg"
         )
 
+    def test_encodes_spaces_and_parentheses(
+        self, connected_client: AmplifyStorageClient
+    ) -> None:
+        url = connected_client.get_url("media/obs-123/1953-A (1).jpg")
+        assert " " not in url
+        assert url == (
+            f"https://{BUCKET}.s3.{REGION}.amazonaws.com"
+            "/media/obs-123/1953-A%20%281%29.jpg"
+        )
+
+    def test_encodes_non_ascii(self, connected_client: AmplifyStorageClient) -> None:
+        url = connected_client.get_url("media/obs-123/1885-ק.jpg")
+        assert url.isascii()
+        assert url == (
+            f"https://{BUCKET}.s3.{REGION}.amazonaws.com"
+            "/media/obs-123/1885-%D7%A7.jpg"
+        )
+
+    def test_preserves_path_separators(
+        self, connected_client: AmplifyStorageClient
+    ) -> None:
+        url = connected_client.get_url("media/obs-123/photo.jpg")
+        assert (
+            url == f"https://{BUCKET}.s3.{REGION}.amazonaws.com/media/obs-123/photo.jpg"
+        )
+
 
 class TestDeleteFile:
     def test_deletes_object(

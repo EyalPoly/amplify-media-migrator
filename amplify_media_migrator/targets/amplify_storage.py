@@ -2,6 +2,7 @@ import io
 import logging
 from pathlib import Path
 from typing import Any, Callable, NoReturn, Optional
+from urllib.parse import quote
 
 import boto3
 from boto3.s3.transfer import TransferConfig
@@ -222,7 +223,8 @@ class AmplifyStorageClient:
             self._handle_client_error(e, key=key, bucket=self._bucket)
 
     def get_url(self, key: str) -> str:
-        return f"https://{self._bucket}.s3.{self._region}.amazonaws.com/{key}"
+        encoded_key = quote(key, safe="/")
+        return f"https://{self._bucket}.s3.{self._region}.amazonaws.com/{encoded_key}"
 
     def delete_file(self, key: str) -> None:
         s3 = self._ensure_connected()
