@@ -21,6 +21,7 @@ from .sources.google_drive import GoogleDriveClient
 from .targets.amplify_storage import AmplifyStorageClient
 from .targets.graphql_client import GraphQLClient
 from .utils.exceptions import AuthenticationError, MigratorError
+from .utils.keep_awake import KeepAwake
 from .utils.logger import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -480,11 +481,12 @@ def migrate(
     click.echo(f"Starting migration for folder {folder_id}...")
 
     try:
-        _run_with_progress(
-            lambda: engine.migrate(folder_id, dry_run, retry_orphans, rescan),
-            engine,
-            desc="Migrating",
-        )
+        with KeepAwake():
+            _run_with_progress(
+                lambda: engine.migrate(folder_id, dry_run, retry_orphans, rescan),
+                engine,
+                desc="Migrating",
+            )
     except MigratorError as e:
         click.echo(f"\nError: {e}", err=True)
         raise SystemExit(1)
