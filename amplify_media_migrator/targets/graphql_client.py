@@ -2,7 +2,7 @@ import logging
 import re
 import threading
 from dataclasses import dataclass
-from typing import Any, Dict, List, NoReturn, Optional
+from typing import Any, Dict, List, NoReturn, Optional, Set
 
 import requests
 import requests.adapters
@@ -336,6 +336,29 @@ class GraphQLClient:
             type=MediaType(item["type"]),
             is_available_for_public_use=item["isAvailableForPublicUse"],
         )
+
+    def get_media_observation_ids_by_url(self, url: str) -> Set[str]:
+        observation_ids: Set[str] = set()
+        next_token: Optional[str] = None
+
+        while True:
+            variables: Dict[str, Any] = {"url": url}
+            if next_token:
+                variables["nextToken"] = next_token
+
+            data = self._execute(
+                _QUERY_MEDIA_BY_URL,
+                variables=variables,
+                operation="GetMediaByUrl",
+            )
+
+            list_data = data.get("listMedia", {})
+            for item in list_data.get("items", []):
+                observation_ids.add(item["observationId"])
+
+            next_token = list_data.get("nextToken")
+            if not next_token:
+                return observation_ids
 
     def get_media_by_url(self, url: str) -> Optional[Media]:
         next_token: Optional[str] = None

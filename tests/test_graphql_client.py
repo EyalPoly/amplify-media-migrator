@@ -552,6 +552,71 @@ class TestGetMediaByUrl:
         assert mock_post.call_count == 2
 
 
+class TestGetMediaObservationIdsByUrl:
+    @patch("requests.Session.post")
+    def test_collects_observation_ids_across_pages(
+        self, mock_post: MagicMock, connected_client: GraphQLClient
+    ) -> None:
+        url = "https://bucket.s3.amazonaws.com/media/obs-1000/1000-1001.jpg"
+        mock_post.side_effect = [
+            _make_response(
+                json_data={
+                    "data": {
+                        "listMedia": {
+                            "items": [
+                                {
+                                    "id": "media-a",
+                                    "url": url,
+                                    "observationId": "obs-1000",
+                                    "type": "PHOTO",
+                                    "isAvailableForPublicUse": False,
+                                }
+                            ],
+                            "nextToken": "token-2",
+                        }
+                    }
+                }
+            ),
+            _make_response(
+                json_data={
+                    "data": {
+                        "listMedia": {
+                            "items": [
+                                {
+                                    "id": "media-b",
+                                    "url": url,
+                                    "observationId": "obs-1001",
+                                    "type": "PHOTO",
+                                    "isAvailableForPublicUse": False,
+                                }
+                            ],
+                            "nextToken": None,
+                        }
+                    }
+                }
+            ),
+        ]
+
+        result = connected_client.get_media_observation_ids_by_url(url)
+
+        assert result == {"obs-1000", "obs-1001"}
+        assert mock_post.call_count == 2
+
+    @patch("requests.Session.post")
+    def test_returns_empty_set_when_none_found(
+        self, mock_post: MagicMock, connected_client: GraphQLClient
+    ) -> None:
+        mock_post.return_value = _make_response(
+            json_data={"data": {"listMedia": {"items": []}}}
+        )
+
+        result = connected_client.get_media_observation_ids_by_url(
+            "https://bucket.s3.amazonaws.com/media/nonexistent.jpg"
+        )
+
+        assert result == set()
+
+
 def test_close_closes_sessions_from_all_threads(client: GraphQLClient) -> None:
     created: List[Any] = []
     add_lock = threading.Lock()
