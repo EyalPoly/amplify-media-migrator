@@ -198,7 +198,19 @@ Export files by status for offline review:
 ```bash
 amplify-media-migrator export --folder-id FOLDER_ID --status orphan --output orphans.json
 amplify-media-migrator export --folder-id FOLDER_ID --status needs_review --output review.json
+amplify-media-migrator export --folder-id FOLDER_ID --status duplicate --output duplicates.json
 ```
+
+Valid `--status` values: `failed`, `orphan`, `needs_review`, `partial`, `duplicate`.
+
+### Deduplication
+
+Before processing, the migrator skips byte-identical copies: files sharing the
+same Google Drive md5 checksum **and** the same sequential IDs are collapsed to a
+single upload. The survivor is chosen deterministically (an already-completed
+file wins; otherwise the cleanest filename — no ` (1)` / ` - Copy` suffix), and
+the skipped copies are recorded with the `duplicate` status. No extra downloads
+are performed; checksums come from Drive metadata.
 
 ## File Naming Conventions
 

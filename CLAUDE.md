@@ -227,6 +227,7 @@ Examples:
 - `orphan` - No matching Observation (skip, don't retry)
 - `needs_review` - Invalid filename pattern (user must rename and retry)
 - `partial` - Some observations succeeded, some failed (for range files like 6000-6001.jpg)
+- `duplicate` - Byte-identical (same md5) to another file with the same sequential IDs; skipped (not uploaded, no Media record)
 
 ---
 
