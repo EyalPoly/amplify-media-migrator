@@ -530,17 +530,19 @@ class MigrationEngine:
             self._reporter.on_file_done(file.id, FileStatus.COMPLETED)
             return
 
+        stored = self._progress.get_file(file.id)
+        already_linked: set[str] = set(stored.observation_ids) if stored else set()
         try:
-            existing_media = await asyncio.to_thread(
-                self._graphql_client.get_media_by_url, s3_url
+            already_linked |= await asyncio.to_thread(
+                self._graphql_client.get_media_observation_ids_by_url, s3_url
             )
         except AuthenticationError:
             raise
         except MigratorError as e:
             logger.warning("Duplicate check failed for %s: %s", file.name, e)
-            existing_media = None
 
-        if existing_media:
+        target_obs_ids = {obs.id for obs in observations.values()}
+        if target_obs_ids <= already_linked:
             self._progress.update_file(
                 file_id=file.id,
                 filename=file.name,
@@ -549,6 +551,7 @@ class MigrationEngine:
                 observation_ids=[obs.id for obs in observations.values()],
                 s3_url=s3_url,
             )
+            self._uploaded_urls.add(s3_url)
             self._reporter.on_file_done(file.id, FileStatus.COMPLETED)
             return
 
@@ -573,7 +576,6 @@ class MigrationEngine:
 
             return _cb
 
-        stored = self._progress.get_file(file.id)
         if stored and stored.status == FileStatus.UPLOADED and stored.s3_url:
             s3_url = stored.s3_url
         elif file.size == 0 or file.size > self._large_file_threshold_bytes:
@@ -636,11 +638,14 @@ class MigrationEngine:
 
         self._reporter.on_file_phase(file.id, "linking")
         media_type = get_media_type(parsed.extension)
-        media_ids: List[str] = []
+        media_ids: List[str] = list(stored.media_ids) if stored else []
         observation_ids: List[str] = []
         failed_seq_ids: List[int] = []
 
         for seq_id, obs in observations.items():
+            if obs.id in already_linked:
+                observation_ids.append(obs.id)
+                continue
             try:
                 media = await self._create_media_with_retry(
                     s3_url,
@@ -661,7 +666,7 @@ class MigrationEngine:
                 )
                 failed_seq_ids.append(seq_id)
 
-        if not media_ids:
+        if not observation_ids:
             status = FileStatus.FAILED
             error = "Failed to create any Media records"
         elif failed_seq_ids:

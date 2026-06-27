@@ -81,6 +81,7 @@ def storage_client() -> MagicMock:
 def graphql_client() -> MagicMock:
     mock = MagicMock(spec=GraphQLClient)
     mock.get_media_by_url.return_value = None
+    mock.get_media_observation_ids_by_url.return_value = set()
 
     def _lookup_single(sequential_id: int) -> Optional[Observation]:
         batch = mock.get_observations_by_sequential_ids.return_value
@@ -497,11 +498,12 @@ class TestDuplicateCheck:
         obs = _observation("obs-1", 6602)
 
         graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
-        graphql_client.get_media_by_url.return_value = _media("existing-m")
+        graphql_client.get_media_observation_ids_by_url.return_value = {"obs-1"}
 
         asyncio.run(engine.process_file(file))
 
         drive_client.download_file.assert_not_called()
+        graphql_client.create_media.assert_not_called()
         assert progress.files["f1"].status == FileStatus.COMPLETED
 
     def test_proceeds_when_no_existing_media(
@@ -517,7 +519,7 @@ class TestDuplicateCheck:
         obs = _observation("obs-1", 6602)
 
         graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
-        graphql_client.get_media_by_url.return_value = None
+        graphql_client.get_media_observation_ids_by_url.return_value = set()
         drive_client.download_file.return_value = b"data"
         storage_client.upload_file.return_value = (
             "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/6602.jpg"
@@ -527,6 +529,109 @@ class TestDuplicateCheck:
         asyncio.run(engine.process_file(file))
 
         drive_client.download_file.assert_called_once()
+        assert progress.files["f1"].status == FileStatus.COMPLETED
+
+
+class TestResumeIdempotency:
+    def test_partial_resume_skips_already_linked_observation(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        url = "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1000/1000-1001.jpg"
+        progress.update_file(
+            "f1",
+            "1000-1001.jpg",
+            FileStatus.PARTIAL,
+            sequential_ids=[1000, 1001],
+            observation_ids=["obs-1000"],
+            s3_url=url,
+            media_ids=["m-1000"],
+        )
+        file = _drive_file("f1", "1000-1001.jpg")
+        observations = {
+            1000: _observation("obs-1000", 1000),
+            1001: _observation("obs-1001", 1001),
+        }
+        graphql_client.get_observations_by_sequential_ids.return_value = observations
+        graphql_client.get_media_observation_ids_by_url.return_value = {"obs-1000"}
+        drive_client.download_file.return_value = b"data"
+        storage_client.upload_file.return_value = url
+        graphql_client.create_media.return_value = _media("m-1001", obs_id="obs-1001")
+
+        asyncio.run(engine.process_file(file))
+
+        graphql_client.create_media.assert_called_once()
+        assert graphql_client.create_media.call_args.args[1] == "obs-1001"
+        fp = progress.files["f1"]
+        assert fp.status == FileStatus.COMPLETED
+        assert set(fp.observation_ids) == {"obs-1000", "obs-1001"}
+
+    def test_partial_resume_no_duplicate_when_dedup_query_fails(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        url = "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1000/1000-1001.jpg"
+        progress.update_file(
+            "f1",
+            "1000-1001.jpg",
+            FileStatus.PARTIAL,
+            sequential_ids=[1000, 1001],
+            observation_ids=["obs-1000"],
+            s3_url=url,
+            media_ids=["m-1000"],
+        )
+        file = _drive_file("f1", "1000-1001.jpg")
+        observations = {
+            1000: _observation("obs-1000", 1000),
+            1001: _observation("obs-1001", 1001),
+        }
+        graphql_client.get_observations_by_sequential_ids.return_value = observations
+        graphql_client.get_media_observation_ids_by_url.side_effect = GraphQLError(
+            "Connection reset", operation="GetMediaByUrl"
+        )
+        drive_client.download_file.return_value = b"data"
+        storage_client.upload_file.return_value = url
+        graphql_client.create_media.return_value = _media("m-1001", obs_id="obs-1001")
+
+        asyncio.run(engine.process_file(file))
+
+        graphql_client.create_media.assert_called_once()
+        assert graphql_client.create_media.call_args.args[1] == "obs-1001"
+        assert progress.files["f1"].status == FileStatus.COMPLETED
+
+    def test_all_observations_already_linked_completes_without_upload(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        file = _drive_file("f1", "1000-1001.jpg")
+        observations = {
+            1000: _observation("obs-1000", 1000),
+            1001: _observation("obs-1001", 1001),
+        }
+        graphql_client.get_observations_by_sequential_ids.return_value = observations
+        graphql_client.get_media_observation_ids_by_url.return_value = {
+            "obs-1000",
+            "obs-1001",
+        }
+
+        asyncio.run(engine.process_file(file))
+
+        drive_client.download_file.assert_not_called()
+        graphql_client.create_media.assert_not_called()
         assert progress.files["f1"].status == FileStatus.COMPLETED
 
 
@@ -567,7 +672,7 @@ class TestUrlCache:
 
         asyncio.run(engine.process_file(file))
 
-        graphql_client.get_media_by_url.assert_not_called()
+        graphql_client.get_media_observation_ids_by_url.assert_not_called()
         drive_client.download_file.assert_not_called()
         fp = progress.files["f1"]
         assert fp.status == FileStatus.COMPLETED
@@ -589,7 +694,7 @@ class TestUrlCache:
         file = _drive_file("f1", "6602.jpg")
         obs = _observation("obs-1", 6602)
         graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
-        graphql_client.get_media_by_url.return_value = None
+        graphql_client.get_media_observation_ids_by_url.return_value = set()
         drive_client.download_file.return_value = b"data"
         storage_client.upload_file.return_value = (
             "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/6602.jpg"
@@ -598,7 +703,7 @@ class TestUrlCache:
 
         asyncio.run(engine.process_file(file))
 
-        graphql_client.get_media_by_url.assert_called_once()
+        graphql_client.get_media_observation_ids_by_url.assert_called_once()
 
     def test_adds_url_to_cache_after_completion(
         self,
@@ -613,7 +718,7 @@ class TestUrlCache:
         obs = _observation("obs-1", 6602)
         url = "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/6602.jpg"
         graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
-        graphql_client.get_media_by_url.return_value = None
+        graphql_client.get_media_observation_ids_by_url.return_value = set()
         drive_client.download_file.return_value = b"data"
         storage_client.upload_file.return_value = url
         graphql_client.create_media.return_value = _media("m-1")
@@ -1867,7 +1972,7 @@ class TestEdgeCases:
         obs = _observation("obs-1", 6602)
 
         graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
-        graphql_client.get_media_by_url.side_effect = GraphQLError(
+        graphql_client.get_media_observation_ids_by_url.side_effect = GraphQLError(
             "Server error", operation="GetMediaByUrl"
         )
         drive_client.download_file.return_value = b"data"
@@ -1877,6 +1982,7 @@ class TestEdgeCases:
         asyncio.run(engine.process_file(file))
 
         drive_client.download_file.assert_called_once()
+        graphql_client.create_media.assert_called_once()
         assert progress.files["f1"].status == FileStatus.COMPLETED
 
     def test_duplicate_check_auth_error_propagates(
@@ -1890,8 +1996,8 @@ class TestEdgeCases:
         obs = _observation("obs-1", 6602)
 
         graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
-        graphql_client.get_media_by_url.side_effect = AuthenticationError(
-            "Token expired", provider="cognito"
+        graphql_client.get_media_observation_ids_by_url.side_effect = (
+            AuthenticationError("Token expired", provider="cognito")
         )
 
         with pytest.raises(AuthenticationError):
@@ -2082,7 +2188,7 @@ class TestAutosave:
         graphql_client.get_observations_by_sequential_ids.return_value = {
             6602: _observation("obs-1", 6602)
         }
-        graphql_client.get_media_by_url.return_value = None
+        graphql_client.get_media_observation_ids_by_url.return_value = set()
         drive_client.download_file.return_value = b"data"
         storage_client.upload_file.return_value = "https://bucket/media/obs-1/6602.jpg"
         graphql_client.create_media.return_value = _media("m-1")
@@ -2150,7 +2256,7 @@ class TestAutosave:
         graphql_client.get_observations_by_sequential_ids.return_value = {
             6602: _observation("obs-1", 6602)
         }
-        graphql_client.get_media_by_url.return_value = None
+        graphql_client.get_media_observation_ids_by_url.return_value = set()
 
         with patch.object(engine, "_start_autosave") as mock_autosave:
             asyncio.run(engine.migrate("folder-1", dry_run=True))
@@ -2168,7 +2274,7 @@ class TestAutosave:
         graphql_client.get_observations_by_sequential_ids.return_value = {
             6602: _observation("obs-1", 6602)
         }
-        graphql_client.get_media_by_url.return_value = None
+        graphql_client.get_media_observation_ids_by_url.return_value = set()
 
         with patch.object(progress, "save") as save_mock:
             asyncio.run(engine.migrate("folder-1", dry_run=True))
