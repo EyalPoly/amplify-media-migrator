@@ -90,8 +90,9 @@ class ConcurrencyController:
     Shrinks hard on retryable errors (multiplicative decrease + cooldown) and
     gently when extra workers stop improving throughput (the bandwidth-bound
     case, which produces no errors). Grows while throughput keeps climbing.
-    The implicit "soft ceiling" is the up-step taken whenever a shrink hurts
-    throughput.
+    A throughput drop only grows back when the previous step was a shrink (the
+    shrink is the likely cause); a drop after a grow backs off instead, so noisy
+    bandwidth-bound throughput can't ratchet the limit up to the ceiling.
     """
 
     def __init__(
@@ -114,6 +115,7 @@ class ConcurrencyController:
 
         self._limit: float = float(max(min_workers, min(max_workers, initial)))
         self._prev_throughput: Optional[float] = None
+        self._last_step_was_shrink = False
         self._cooldown = 0
 
         self._active = 0
@@ -141,21 +143,30 @@ class ConcurrencyController:
         if errors > 0:
             self._limit = max(self._min, self._limit * self._decrease_factor)
             self._cooldown = self._cooldown_windows
+            self._last_step_was_shrink = False
         elif self._cooldown == 0:
             prev = self._prev_throughput
             if prev is not None and prev > 0:
                 change = (throughput - prev) / prev
-                if change < -self._hysteresis:
-                    self._limit = min(self._max, self._limit + self._step)
-                elif abs(change) <= self._hysteresis:
-                    self._limit = max(self._min, self._limit - self._step)
+                if change > self._hysteresis:
+                    self._grow()
+                elif change < -self._hysteresis and self._last_step_was_shrink:
+                    self._grow()
                 else:
-                    self._limit = min(self._max, self._limit + self._step)
+                    self._shrink()
             else:
-                self._limit = min(self._max, self._limit + self._step)
+                self._grow()
 
         self._limit = max(self._min, min(self._max, self._limit))
         self._prev_throughput = throughput
+
+    def _grow(self) -> None:
+        self._limit = min(self._max, self._limit + self._step)
+        self._last_step_was_shrink = False
+
+    def _shrink(self) -> None:
+        self._limit = max(self._min, self._limit - self._step)
+        self._last_step_was_shrink = True
 
     def _ensure_cond(self) -> asyncio.Condition:
         if self._cond is None:

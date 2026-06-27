@@ -97,11 +97,24 @@ class TestControllerStep:
         c.step(errors=0, throughput=1000.0)  # flat -> -2 -> 20
         assert c.current_limit() == 20
 
-    def test_throughput_drop_steps_back_up(self) -> None:
+    def test_drop_after_growth_steps_down(self) -> None:
         c = _controller(initial=20)
-        c.step(errors=0, throughput=2000.0)  # baseline -> 22
-        c.step(errors=0, throughput=1000.0)  # dropped >15% -> +2 -> 24
-        assert c.current_limit() == 24
+        c.step(errors=0, throughput=2000.0)  # baseline grow -> 22
+        c.step(errors=0, throughput=1000.0)  # drop after a grow -> back off -> 20
+        assert c.current_limit() == 20
+
+    def test_drop_after_shrink_recovers(self) -> None:
+        c = _controller(initial=20)
+        c.step(errors=0, throughput=2000.0)  # baseline grow -> 22
+        c.step(errors=0, throughput=2000.0)  # flat -> shrink -> 20
+        c.step(errors=0, throughput=1000.0)  # drop after a shrink -> recover -> 22
+        assert c.current_limit() == 22
+
+    def test_noisy_throughput_does_not_ratchet_up(self) -> None:
+        c = _controller(initial=10)
+        for tput in [1000.0, 3000.0] * 4:
+            c.step(errors=0, throughput=tput)
+        assert c.current_limit() == 14
 
     def test_error_triggers_cooldown_blocking_increase(self) -> None:
         c = _controller(initial=20)
