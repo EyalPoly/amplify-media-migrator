@@ -382,6 +382,7 @@ def _print_summary(summary: dict) -> None:
     click.echo(f"  Orphan:         {summary['orphan']}")
     click.echo(f"  Needs review:   {summary['needs_review']}")
     click.echo(f"  Partial:        {summary['partial']}")
+    click.echo(f"  Duplicate:      {summary['duplicate']}")
     click.echo(f"  Pending:        {summary['pending']}")
 
 
@@ -519,7 +520,7 @@ def review(folder_id: str) -> None:
 @click.option("--folder-id", required=True, help="Google Drive folder ID")
 @click.option(
     "--status",
-    type=click.Choice(["needs_review", "orphan", "failed", "partial"]),
+    type=click.Choice(["needs_review", "orphan", "failed", "partial", "duplicate"]),
     required=True,
     help="Status of files to export",
 )
@@ -648,6 +649,7 @@ def status(folder_id: str) -> None:
     click.echo(f"  Orphan:         {summary.orphan}")
     click.echo(f"  Needs review:   {summary.needs_review}")
     click.echo(f"  Partial:        {summary.partial}")
+    click.echo(f"  Duplicate:      {summary.duplicate}")
     click.echo(f"  Pending:        {summary.pending}")
     click.echo(f"  Downloaded:     {summary.downloaded}")
     click.echo(f"  Uploaded:       {summary.uploaded}")

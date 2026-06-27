@@ -338,6 +338,7 @@ class TestBuildSummaryDict:
             "orphan",
             "needs_review",
             "partial",
+            "duplicate",
         }
         assert summary_dict["completed"] == 1
         assert summary_dict["failed"] == 1
@@ -436,3 +437,43 @@ class TestLoadFromFixture:
 
         partial_ids = tracker.get_partial_file_ids()
         assert partial_ids == ["file-partial-1"]
+
+
+def test_summary_counts_duplicates(tracker: ProgressTracker) -> None:
+    tracker.load("folder-1")
+    tracker.update_file(file_id="f1", filename="a.jpg", status=FileStatus.DUPLICATE)
+    tracker.update_file(file_id="f2", filename="b.jpg", status=FileStatus.DUPLICATE)
+    summary = tracker.get_summary()
+    assert summary.duplicate == 2
+    assert set(tracker.get_duplicate_file_ids()) == {"f1", "f2"}
+
+
+def test_update_file_stores_checksum(tracker: ProgressTracker) -> None:
+    tracker.load("folder-1")
+    tracker.update_file(
+        file_id="f1",
+        filename="6602.jpg",
+        status=FileStatus.PENDING,
+        checksum="abc123",
+    )
+    stored = tracker.get_file("f1")
+    assert stored is not None
+    assert stored.checksum == "abc123"
+
+
+def test_checksum_round_trips_through_save_load(tmp_path: Path) -> None:
+    tracker = ProgressTracker(progress_dir=tmp_path)
+    tracker.load("folder-1")
+    tracker.update_file(
+        file_id="f1",
+        filename="6602.jpg",
+        status=FileStatus.COMPLETED,
+        checksum="abc123",
+    )
+    tracker.save()
+
+    reloaded = ProgressTracker(progress_dir=tmp_path)
+    reloaded.load("folder-1")
+    restored = reloaded.get_file("f1")
+    assert restored is not None
+    assert restored.checksum == "abc123"
