@@ -508,6 +508,7 @@ class TestPrintSummary:
             "orphan": 10,
             "needs_review": 3,
             "partial": 1,
+            "duplicate": 0,
             "pending": 1,
         }
         result = runner.invoke(main, ["--help"])
@@ -548,6 +549,7 @@ class TestScanCommand:
                 "orphan": 0,
                 "needs_review": 2,
                 "partial": 0,
+                "duplicate": 0,
                 "pending": 14,
             }
             result = runner.invoke(main, ["scan", "--folder-id", "test-folder"])
@@ -659,6 +661,30 @@ class TestExportCommand:
             assert result.exit_code == 0
             assert "Exported 5 files" in result.output
 
+    def test_export_duplicate_status(self, runner: CliRunner, tmp_path: Path) -> None:
+        output_file = tmp_path / "dup.json"
+
+        with patch("amplify_media_migrator.cli.ProgressTracker") as mock_tracker_cls:
+            mock_tracker = MagicMock()
+            mock_tracker.load.return_value = True
+            mock_tracker.export_to_json.return_value = 3
+            mock_tracker_cls.return_value = mock_tracker
+
+            result = runner.invoke(
+                main,
+                [
+                    "export",
+                    "--folder-id",
+                    "test",
+                    "--status",
+                    "duplicate",
+                    "--output",
+                    str(output_file),
+                ],
+            )
+            assert result.exit_code == 0
+            assert "Exported 3 files" in result.output
+
     def test_export_invalid_status(self, runner: CliRunner) -> None:
         result = runner.invoke(
             main,
@@ -699,6 +725,7 @@ class TestMigrateCommand:
             "orphan": 0,
             "needs_review": 0,
             "partial": 0,
+            "duplicate": 0,
             "pending": 0,
         }
         mock_create.return_value = mock_engine
@@ -731,6 +758,7 @@ class TestMigrateCommand:
             "orphan": 0,
             "needs_review": 0,
             "partial": 0,
+            "duplicate": 0,
             "pending": 0,
         }
         mock_create.return_value = mock_engine
@@ -762,6 +790,7 @@ class TestMigrateCommand:
             "orphan": 0,
             "needs_review": 0,
             "partial": 0,
+            "duplicate": 0,
             "pending": 0,
         }
         mock_create.return_value = mock_engine
@@ -800,6 +829,7 @@ class TestMigrateVerbose:
             "orphan": 0,
             "needs_review": 0,
             "partial": 0,
+            "duplicate": 0,
             "pending": 0,
         }
         mock_create.return_value = mock_engine
