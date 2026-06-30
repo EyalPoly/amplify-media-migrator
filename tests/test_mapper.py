@@ -138,6 +138,51 @@ class TestRangePattern:
         assert "greater than end" in (result.error or "")
 
 
+class TestRangeWithLetterSuffix:
+    def test_basic_uppercase(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("2503-2504-A.jpg")
+        assert result.pattern == FilenamePattern.RANGE
+        assert result.sequential_ids == [2503, 2504]
+        assert result.extension == "jpg"
+        assert result.error is None
+
+    def test_siblings_share_ids(self, mapper: FilenameMapper) -> None:
+        for label in ["A", "B", "C"]:
+            result = mapper.parse(f"2606-2607-{label}.mp4")
+            assert result.pattern == FilenamePattern.RANGE
+            assert result.sequential_ids == [2606, 2607]
+            assert result.extension == "mp4"
+
+    def test_lowercase_suffix(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("2503-2504-b.jpg")
+        assert result.pattern == FilenamePattern.RANGE
+        assert result.sequential_ids == [2503, 2504]
+
+    def test_larger_range(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("1200-1202-A.mp4")
+        assert result.pattern == FilenamePattern.RANGE
+        assert result.sequential_ids == [1200, 1201, 1202]
+
+    def test_with_prefix(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("E6000-6001-A.jpg")
+        assert result.pattern == FilenamePattern.RANGE
+        assert result.sequential_ids == [6000, 6001]
+        assert result.prefix == "E"
+
+    def test_preserves_original(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("2503-2504-A.jpg")
+        assert result.original_filename == "2503-2504-A.jpg"
+
+    def test_reversed_is_invalid(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("2504-2503-A.jpg")
+        assert result.pattern == FilenamePattern.INVALID
+        assert "greater than end" in (result.error or "")
+
+    def test_numeric_third_segment_still_invalid(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("6000-6001-6002.jpg")
+        assert result.pattern == FilenamePattern.INVALID
+
+
 class TestInvalidPattern:
     def test_non_numeric_base(self, mapper: FilenameMapper) -> None:
         result = mapper.parse("abc123.jpg")

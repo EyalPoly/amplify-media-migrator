@@ -31,33 +31,37 @@ _MULTIPLE_HYPHEN_RE = re.compile(
     rf"^{_PREFIX}(\d+)-[^-.]*[^-.\d][^-.]*\.{_EXT}$", re.IGNORECASE
 )
 _RANGE_RE = re.compile(rf"^{_PREFIX}(\d+)-(\d+)\.{_EXT}$", re.IGNORECASE)
+_RANGE_MULTIPLE_RE = re.compile(
+    rf"^{_PREFIX}(\d+)-(\d+)-[^-.]*[^-.\d][^-.]*\.{_EXT}$", re.IGNORECASE
+)
 
 
 class FilenameMapper:
     VALID_EXTENSIONS = VALID_EXTENSIONS
 
     def parse(self, filename: str) -> ParsedFilename:
-        match = _RANGE_RE.match(filename)
-        if match:
-            prefix = match.group(1)
-            start, end = int(match.group(2)), int(match.group(3))
-            ext = match.group(4).lower()
-            if start > end:
+        for regex in (_RANGE_RE, _RANGE_MULTIPLE_RE):
+            match = regex.match(filename)
+            if match:
+                prefix = match.group(1)
+                start, end = int(match.group(2)), int(match.group(3))
+                ext = match.group(4).lower()
+                if start > end:
+                    return ParsedFilename(
+                        pattern=FilenamePattern.INVALID,
+                        sequential_ids=[],
+                        extension=ext,
+                        original_filename=filename,
+                        error=f"Range start ({start}) is greater than end ({end})",
+                        prefix=prefix,
+                    )
                 return ParsedFilename(
-                    pattern=FilenamePattern.INVALID,
-                    sequential_ids=[],
+                    pattern=FilenamePattern.RANGE,
+                    sequential_ids=list(range(start, end + 1)),
                     extension=ext,
                     original_filename=filename,
-                    error=f"Range start ({start}) is greater than end ({end})",
                     prefix=prefix,
                 )
-            return ParsedFilename(
-                pattern=FilenamePattern.RANGE,
-                sequential_ids=list(range(start, end + 1)),
-                extension=ext,
-                original_filename=filename,
-                prefix=prefix,
-            )
 
         for regex, pattern in (
             (_MULTIPLE_HYPHEN_RE, FilenamePattern.MULTIPLE),
