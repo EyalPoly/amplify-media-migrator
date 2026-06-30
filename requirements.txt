@@ -20,4 +20,4 @@ pytest-cov>=4.1.0
 pytest-asyncio>=1.2.0
 mypy>=1.8.0
 black>=24.1.0
-moto>=5.1.22
+moto>=5.2.2
