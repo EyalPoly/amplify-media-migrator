@@ -26,7 +26,7 @@ VALID_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "mp4", "mov", "avi", "wmv"}
 _EXT = r"(jpg|jpeg|png|gif|mp4|mov|avi|wmv)"
 _PREFIX = r"([A-Za-z]?)"
 _SINGLE_RE = re.compile(rf"^{_PREFIX}(\d+)\.{_EXT}$", re.IGNORECASE)
-_MULTIPLE_RE = re.compile(rf"^{_PREFIX}(\d+)[a-zA-Z]\.{_EXT}$", re.IGNORECASE)
+_MULTIPLE_RE = re.compile(rf"^{_PREFIX}(\d+)[a-zA-Z]+\.{_EXT}$", re.IGNORECASE)
 _MULTIPLE_HYPHEN_RE = re.compile(
     rf"^{_PREFIX}(\d+)-[^-.]*[^-.\d][^-.]*\.{_EXT}$", re.IGNORECASE
 )

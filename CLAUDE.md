@@ -62,12 +62,13 @@ Files follow these patterns:
 - **Mapping**: 1 file → 1 observation
 
 #### Pattern 2: Multiple media per observation
-- **Format**: `{sequentialId}{letter}.{extension}` where letter is a-z (lowercase)
+- **Format**: `{sequentialId}{letters}.{extension}` where letters are a-z (case-insensitive), one or more
 - **Examples**:
   - `6602.jpg` + `6602a.jpg` + `6602b.jpg` → all link to sequentialId = 6602
   - `1234.mp4` + `1234a.jpg` → both link to sequentialId = 1234
+  - `3826aa.jpg` + `3826ab.jpg` → link to sequentialId = 3826 (multi-letter, for >26 media)
 - **Mapping**: Multiple files → 1 observation (hasMany relationship)
-- **Letter handling**: Base file has no letter, subsequent files use a, b, c, etc.
+- **Letter handling**: Base file has no letter, subsequent files use a, b, c, …, z, aa, ab, etc.
 
 #### Pattern 3: Shared media across observations (rare)
 - **Format**: `{sequentialId1}-{sequentialId2}.{extension}` (range notation)
@@ -89,7 +90,7 @@ Files that don't match any valid pattern:
 
 **Regex patterns**:
 - Single: `^\d+\.(jpg|jpeg|png|gif|mp4|mov|avi)$`
-- Multiple: `^\d+[a-z]\.(jpg|jpeg|png|gif|mp4|mov|avi)$`
+- Multiple: `^\d+[a-z]+\.(jpg|jpeg|png|gif|mp4|mov|avi)$`
 - Range: `^\d+-\d+\.(jpg|jpeg|png|gif|mp4|mov|avi)$`
 
 ### MECO Schema

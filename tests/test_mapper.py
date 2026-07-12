@@ -64,6 +64,20 @@ class TestMultiplePattern:
         assert result.sequential_ids == [6602]
         assert result.extension == "mov"
 
+    def test_multi_letter_suffix(self, mapper: FilenameMapper) -> None:
+        for suffix in ["aa", "ab", "as", "ah", "aaa"]:
+            result = mapper.parse(f"3826{suffix}.jpg")
+            assert result.pattern == FilenamePattern.MULTIPLE
+            assert result.sequential_ids == [3826]
+            assert result.extension == "jpg"
+            assert result.error is None
+
+    def test_multi_letter_suffix_video(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("3571aa.mp4")
+        assert result.pattern == FilenamePattern.MULTIPLE
+        assert result.sequential_ids == [3571]
+        assert result.extension == "mp4"
+
     def test_hyphen_letter_uppercase(self, mapper: FilenameMapper) -> None:
         result = mapper.parse("131-A.jpg")
         assert result.pattern == FilenamePattern.MULTIPLE
