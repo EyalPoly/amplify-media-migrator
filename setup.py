@@ -28,7 +28,7 @@ setup(
     version="1.11.2",
     description="CLI tool to migrate media files from Google Drive to AWS Amplify Storage",
     author="MECO Team",
-    python_requires=">=3.9",
+    python_requires=">=3.10",
     packages=find_packages(exclude=["tests", "tests.*"]),
     install_requires=requirements,
     extras_require={
@@ -43,7 +43,6 @@ setup(
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
