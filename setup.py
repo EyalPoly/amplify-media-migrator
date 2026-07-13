@@ -1,28 +1,27 @@
+from pathlib import Path
+
 from setuptools import setup, find_packages
 
-requirements = [
-    "amplify-auth>=0.1.0",
-    "click>=8.1.0",
-    "boto3>=1.34.0",
-    "pycognito>=2023.5.0",
-    "google-api-python-client>=2.0.0",
-    "google-auth-httplib2>=0.2.0",
-    "google-auth-oauthlib>=1.0.0",
-    "gql[requests]>=3.5.0",
-    "requests>=2.31.0",
-    "python-dateutil>=2.8.0",
-    "rich>=13.7.0",
-    "tqdm>=4.66.0",
-]
+_DEV_SECTION = "dev dependencies"
 
-dev_requirements = [
-    "pytest>=7.4.0",
-    "pytest-cov>=4.1.0",
-    "pytest-asyncio>=0.21.0",
-    "mypy>=1.8.0",
-    "black>=24.1.0",
-    "moto>=4.2.0",
-]
+
+def _parse_requirements() -> tuple[list[str], list[str]]:
+    runtime: list[str] = []
+    dev: list[str] = []
+    bucket = runtime
+    for raw in (Path(__file__).parent / "requirements.txt").read_text().splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            if _DEV_SECTION in line.lower():
+                bucket = dev
+            continue
+        bucket.append(line)
+    return runtime, dev
+
+
+requirements, dev_requirements = _parse_requirements()
 
 setup(
     name="amplify-media-migrator",
