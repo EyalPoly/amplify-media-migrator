@@ -234,6 +234,56 @@ class TestInvalidPattern:
         assert result.pattern == FilenamePattern.INVALID
 
 
+class TestJfifExtension:
+    def test_single(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("4290.jfif")
+        assert result.pattern == FilenamePattern.SINGLE
+        assert result.sequential_ids == [4290]
+        assert result.extension == "jfif"
+        assert result.error is None
+
+    def test_multiple(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("4328a.jfif")
+        assert result.pattern == FilenamePattern.MULTIPLE
+        assert result.sequential_ids == [4328]
+        assert result.extension == "jfif"
+
+    def test_range(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("6000-6001.jfif")
+        assert result.pattern == FilenamePattern.RANGE
+        assert result.sequential_ids == [6000, 6001]
+        assert result.extension == "jfif"
+
+    def test_case_insensitive(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("4290.JFIF")
+        assert result.pattern == FilenamePattern.SINGLE
+        assert result.extension == "jfif"
+
+
+class TestPlusRangeSeparator:
+    def test_basic(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("4394+4395.mp4")
+        assert result.pattern == FilenamePattern.RANGE
+        assert result.sequential_ids == [4394, 4395]
+        assert result.extension == "mp4"
+        assert result.error is None
+
+    def test_larger_range(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("1200+1205.jpg")
+        assert result.pattern == FilenamePattern.RANGE
+        assert result.sequential_ids == [1200, 1201, 1202, 1203, 1204, 1205]
+
+    def test_reversed_is_invalid(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("4395+4394.mp4")
+        assert result.pattern == FilenamePattern.INVALID
+        assert "greater than end" in (result.error or "")
+
+    def test_with_letter_suffix(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("2503+2504-A.jpg")
+        assert result.pattern == FilenamePattern.RANGE
+        assert result.sequential_ids == [2503, 2504]
+
+
 class TestIsValidExtension:
     def test_valid(self, mapper: FilenameMapper) -> None:
         for ext in ["jpg", "jpeg", "png", "gif", "mp4", "mov", "avi"]:
