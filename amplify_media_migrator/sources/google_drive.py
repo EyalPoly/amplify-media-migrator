@@ -1,6 +1,7 @@
 import io
 import logging
 import threading
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, NoReturn, Optional
@@ -26,6 +27,11 @@ logger = logging.getLogger(__name__)
 FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 
 
+def sanitize_filename(name: str) -> str:
+    cleaned = "".join(c for c in name if unicodedata.category(c) != "Cf")
+    return cleaned.strip()
+
+
 @dataclass
 class DriveFile:
     id: str
@@ -34,6 +40,9 @@ class DriveFile:
     size: int
     parent_id: Optional[str] = None
     checksum: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        self.name = sanitize_filename(self.name)
 
 
 class GoogleDriveClient:

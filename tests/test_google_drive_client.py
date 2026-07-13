@@ -8,6 +8,7 @@ from amplify_media_migrator.sources.google_drive import (
     DriveFile,
     FOLDER_MIME_TYPE,
     GoogleDriveClient,
+    sanitize_filename,
 )
 from amplify_media_migrator.utils.exceptions import (
     AuthenticationError,
@@ -46,6 +47,26 @@ def _make_http_error(status: int, reason: str = "error") -> HttpError:
     resp.status = status
     resp.get.return_value = None
     return HttpError(resp=resp, content=reason.encode())
+
+
+class TestSanitizeFilename:
+    def test_strips_leading_rtl_marks(self) -> None:
+        assert sanitize_filename("‏‏4232.mp4") == "4232.mp4"
+
+    def test_strips_zero_width_and_bidi_chars(self) -> None:
+        assert sanitize_filename("‎6602​a﻿.jpg") == "6602a.jpg"
+
+    def test_strips_surrounding_whitespace(self) -> None:
+        assert sanitize_filename("  6602.jpg  ") == "6602.jpg"
+
+    def test_leaves_clean_name_unchanged(self) -> None:
+        assert sanitize_filename("6602.jpg") == "6602.jpg"
+
+
+class TestDriveFileSanitizesName:
+    def test_post_init_strips_invisible_chars(self) -> None:
+        f = DriveFile(id="x", name="‏‏4452a.mp4", mime_type="video/mp4", size=1)
+        assert f.name == "4452a.mp4"
 
 
 class TestInit:

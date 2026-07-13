@@ -6,12 +6,13 @@ class MediaType(Enum):
     VIDEO = "VIDEO"
 
 
-IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "gif"}
+IMAGE_EXTENSIONS = {"jpg", "jpeg", "jfif", "png", "gif"}
 VIDEO_EXTENSIONS = {"mp4", "mov", "avi", "wmv"}
 
 CONTENT_TYPES = {
     "jpg": "image/jpeg",
     "jpeg": "image/jpeg",
+    "jfif": "image/jpeg",
     "png": "image/png",
     "gif": "image/gif",
     "mp4": "video/mp4",

@@ -19,6 +19,10 @@ class TestGetMediaType:
         for ext in VIDEO_EXTENSIONS:
             assert get_media_type(ext) == MediaType.VIDEO
 
+    def test_jfif_is_image(self):
+        assert get_media_type("jfif") == MediaType.IMAGE
+        assert get_media_type("JFIF") == MediaType.IMAGE
+
     def test_case_insensitive(self):
         assert get_media_type("JPG") == MediaType.IMAGE
         assert get_media_type("Jpeg") == MediaType.IMAGE
@@ -46,6 +50,10 @@ class TestGetContentType:
     def test_all_content_types(self):
         for ext, content_type in CONTENT_TYPES.items():
             assert get_content_type(ext) == content_type
+
+    def test_jfif_is_jpeg(self):
+        assert get_content_type("jfif") == "image/jpeg"
+        assert get_content_type("JFIF") == "image/jpeg"
 
     def test_case_insensitive(self):
         assert get_content_type("JPG") == "image/jpeg"
