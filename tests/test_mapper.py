@@ -407,3 +407,113 @@ class TestPrefix:
         # only a single letter immediately followed by digits is a prefix
         result = mapper.parse("final2.jpg")
         assert result.pattern == FilenamePattern.INVALID
+
+
+class TestCopySuffixPattern:
+    def test_paren_number_single(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("5414 (1).mp4")
+        assert result.pattern == FilenamePattern.SINGLE
+        assert result.sequential_ids == [5414]
+        assert result.extension == "mp4"
+        assert result.error is None
+
+    def test_paren_number_multiple(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("5112a (1).mp4")
+        assert result.pattern == FilenamePattern.MULTIPLE
+        assert result.sequential_ids == [5112]
+
+    def test_dash_copy_multiple(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("5287c - Copy.jpg")
+        assert result.pattern == FilenamePattern.MULTIPLE
+        assert result.sequential_ids == [5287]
+
+    def test_dash_copy_case_insensitive(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("5287c - copy.jpg")
+        assert result.pattern == FilenamePattern.MULTIPLE
+        assert result.sequential_ids == [5287]
+
+    def test_higher_copy_index(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("4822 (2).mp4")
+        assert result.pattern == FilenamePattern.SINGLE
+        assert result.sequential_ids == [4822]
+
+    def test_paren_no_space_multiple(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("4544e(1).jpg")
+        assert result.pattern == FilenamePattern.MULTIPLE
+        assert result.sequential_ids == [4544]
+
+    def test_paren_no_space_single(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("1166(1).jpg")
+        assert result.pattern == FilenamePattern.SINGLE
+        assert result.sequential_ids == [1166]
+
+    def test_paren_no_space_hyphen_multiple(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("1164-K(1).jpg")
+        assert result.pattern == FilenamePattern.MULTIPLE
+        assert result.sequential_ids == [1164]
+
+    def test_preserves_original_with_suffix(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("5414 (1).mp4")
+        assert result.original_filename == "5414 (1).mp4"
+
+
+class TestSpaceBeforeLetterPattern:
+    def test_basic(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("5049 a.jpeg")
+        assert result.pattern == FilenamePattern.MULTIPLE
+        assert result.sequential_ids == [5049]
+        assert result.extension == "jpeg"
+        assert result.error is None
+
+    def test_various_letters(self, mapper: FilenameMapper) -> None:
+        for letter in ["a", "b", "c", "l", "z"]:
+            result = mapper.parse(f"5049 {letter}.jpeg")
+            assert result.pattern == FilenamePattern.MULTIPLE
+            assert result.sequential_ids == [5049]
+
+    def test_multi_letter(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("5049 aa.jpeg")
+        assert result.pattern == FilenamePattern.MULTIPLE
+        assert result.sequential_ids == [5049]
+
+    def test_preserves_original(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("5049 a.jpeg")
+        assert result.original_filename == "5049 a.jpeg"
+
+
+class TestListPattern:
+    def test_comma_two_ids(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("5143a,5144a.mp4")
+        assert result.pattern == FilenamePattern.LIST
+        assert result.sequential_ids == [5143, 5144]
+        assert result.extension == "mp4"
+        assert result.error is None
+
+    def test_comma_second_variant(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("5122a,5123a.mp4")
+        assert result.pattern == FilenamePattern.LIST
+        assert result.sequential_ids == [5122, 5123]
+
+    def test_plus_non_contiguous_descending(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("5383k+2381b.jpg")
+        assert result.pattern == FilenamePattern.LIST
+        assert result.sequential_ids == [5383, 2381]
+
+    def test_comma_trailing_label(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("3337,3338M.mp4")
+        assert result.pattern == FilenamePattern.LIST
+        assert result.sequential_ids == [3337, 3338]
+
+    def test_preserves_original(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("5143a,5144a.mp4")
+        assert result.original_filename == "5143a,5144a.mp4"
+
+    def test_plus_pure_numeric_stays_range(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("4394+4395.mp4")
+        assert result.pattern == FilenamePattern.RANGE
+        assert result.sequential_ids == [4394, 4395]
+
+    def test_plus_pure_numeric_range_expands(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("1200+1205.jpg")
+        assert result.pattern == FilenamePattern.RANGE
+        assert result.sequential_ids == [1200, 1201, 1202, 1203, 1204, 1205]

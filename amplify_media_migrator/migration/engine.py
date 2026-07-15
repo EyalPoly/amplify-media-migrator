@@ -2,7 +2,6 @@ import asyncio
 import concurrent.futures
 import logging
 import random
-import re
 import threading
 from typing import Callable, Dict, List, Optional
 
@@ -25,13 +24,16 @@ from .concurrency import (
     InflightBudget,
     ThroughputMeter,
 )
-from .mapper import FilenameMapper, FilenamePattern, ParsedFilename
+from .mapper import (
+    COPY_SUFFIX_RE,
+    FilenameMapper,
+    FilenamePattern,
+    ParsedFilename,
+)
 from .progress import FileStatus, ProgressTracker
 from .reporter import NullReporter, ProgressReporter
 
 logger = logging.getLogger(__name__)
-
-_COPY_SUFFIX_RE = re.compile(r"\s\(\d+\)|\s-\s*copy", re.IGNORECASE)
 
 
 class MigrationEngine:
@@ -280,7 +282,7 @@ class MigrationEngine:
 
     @staticmethod
     def _dedup_sort_key(name: str) -> tuple:
-        has_copy_suffix = bool(_COPY_SUFFIX_RE.search(name))
+        has_copy_suffix = bool(COPY_SUFFIX_RE.search(name))
         return (has_copy_suffix, len(name), name)
 
     def _dedup_by_checksum(self, files: List[DriveFile]) -> List[DriveFile]:
