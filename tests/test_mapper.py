@@ -260,28 +260,34 @@ class TestJfifExtension:
         assert result.extension == "jfif"
 
 
-class TestPlusRangeSeparator:
+class TestPlusListSeparator:
     def test_basic(self, mapper: FilenameMapper) -> None:
         result = mapper.parse("4394+4395.mp4")
-        assert result.pattern == FilenamePattern.RANGE
+        assert result.pattern == FilenamePattern.LIST
         assert result.sequential_ids == [4394, 4395]
         assert result.extension == "mp4"
         assert result.error is None
 
-    def test_larger_range(self, mapper: FilenameMapper) -> None:
+    def test_non_contiguous_does_not_expand(self, mapper: FilenameMapper) -> None:
         result = mapper.parse("1200+1205.jpg")
-        assert result.pattern == FilenamePattern.RANGE
-        assert result.sequential_ids == [1200, 1201, 1202, 1203, 1204, 1205]
+        assert result.pattern == FilenamePattern.LIST
+        assert result.sequential_ids == [1200, 1205]
 
-    def test_reversed_is_invalid(self, mapper: FilenameMapper) -> None:
+    def test_descending_is_valid(self, mapper: FilenameMapper) -> None:
         result = mapper.parse("4395+4394.mp4")
-        assert result.pattern == FilenamePattern.INVALID
-        assert "greater than end" in (result.error or "")
+        assert result.pattern == FilenamePattern.LIST
+        assert result.sequential_ids == [4395, 4394]
+        assert result.error is None
 
-    def test_with_letter_suffix(self, mapper: FilenameMapper) -> None:
+    def test_with_hyphen_label(self, mapper: FilenameMapper) -> None:
         result = mapper.parse("2503+2504-A.jpg")
-        assert result.pattern == FilenamePattern.RANGE
+        assert result.pattern == FilenamePattern.LIST
         assert result.sequential_ids == [2503, 2504]
+
+    def test_hyphen_label_on_both_items(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("2850-N+2851-C.mp4")
+        assert result.pattern == FilenamePattern.LIST
+        assert result.sequential_ids == [2850, 2851]
 
 
 class TestIsValidExtension:
@@ -508,12 +514,47 @@ class TestListPattern:
         result = mapper.parse("5143a,5144a.mp4")
         assert result.original_filename == "5143a,5144a.mp4"
 
-    def test_plus_pure_numeric_stays_range(self, mapper: FilenameMapper) -> None:
+    def test_plus_pure_numeric_is_list(self, mapper: FilenameMapper) -> None:
         result = mapper.parse("4394+4395.mp4")
-        assert result.pattern == FilenamePattern.RANGE
+        assert result.pattern == FilenamePattern.LIST
         assert result.sequential_ids == [4394, 4395]
 
-    def test_plus_pure_numeric_range_expands(self, mapper: FilenameMapper) -> None:
+    def test_plus_pure_numeric_does_not_expand(self, mapper: FilenameMapper) -> None:
         result = mapper.parse("1200+1205.jpg")
+        assert result.pattern == FilenamePattern.LIST
+        assert result.sequential_ids == [1200, 1205]
+
+    def test_comma_pure_numeric_two_ids(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("5538,5539.mp4")
+        assert result.pattern == FilenamePattern.LIST
+        assert result.sequential_ids == [5538, 5539]
+
+    def test_comma_pure_numeric_three_ids(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("5572,5573,5574.mp4")
+        assert result.pattern == FilenamePattern.LIST
+        assert result.sequential_ids == [5572, 5573, 5574]
+
+    def test_comma_space_separated(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("5730, 5731.mp4")
+        assert result.pattern == FilenamePattern.LIST
+        assert result.sequential_ids == [5730, 5731]
+
+    def test_comma_space_with_letters(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("5576, 5575a, 5577a.jpg")
+        assert result.pattern == FilenamePattern.LIST
+        assert result.sequential_ids == [5576, 5575, 5577]
+
+    def test_comma_mixed_spacing(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("5740b,5743c, 5742d.mp4")
+        assert result.pattern == FilenamePattern.LIST
+        assert result.sequential_ids == [5740, 5743, 5742]
+
+    def test_comma_long_pure_numeric_list(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("3237,3238,3239,3240,3241.mp4")
+        assert result.pattern == FilenamePattern.LIST
+        assert result.sequential_ids == [3237, 3238, 3239, 3240, 3241]
+
+    def test_hyphen_still_expands_as_range(self, mapper: FilenameMapper) -> None:
+        result = mapper.parse("1200-1205.jpg")
         assert result.pattern == FilenamePattern.RANGE
         assert result.sequential_ids == [1200, 1201, 1202, 1203, 1204, 1205]

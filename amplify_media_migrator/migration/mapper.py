@@ -34,13 +34,13 @@ _MULTIPLE_SPACE_RE = re.compile(rf"^{_PREFIX}(\d+)\s+[a-zA-Z]+\.{_EXT}$", re.IGN
 _MULTIPLE_HYPHEN_RE = re.compile(
     rf"^{_PREFIX}(\d+)-[^-.]*[^-.\d][^-.]*\.{_EXT}$", re.IGNORECASE
 )
-_RANGE_RE = re.compile(rf"^{_PREFIX}(\d+)[-+](\d+)\.{_EXT}$", re.IGNORECASE)
+_RANGE_RE = re.compile(rf"^{_PREFIX}(\d+)-(\d+)\.{_EXT}$", re.IGNORECASE)
 _RANGE_MULTIPLE_RE = re.compile(
-    rf"^{_PREFIX}(\d+)[-+](\d+)-[^-.]*[^-.\d][^-.]*\.{_EXT}$", re.IGNORECASE
+    rf"^{_PREFIX}(\d+)-(\d+)-[^-.]*[^-.\d][^-.]*\.{_EXT}$", re.IGNORECASE
 )
+_LIST_ITEM = r"\d+(?:[A-Za-z]*|-[A-Za-z]+)"
 _LIST_RE = re.compile(
-    rf"^{_PREFIX}(?=[\dA-Za-z,+]*[A-Za-z])"
-    rf"(\d+[A-Za-z]*(?:[,+]\d+[A-Za-z]*)+)\.{_EXT}$",
+    rf"^{_PREFIX}({_LIST_ITEM}(?:\s*[,+]\s*{_LIST_ITEM})+)\.{_EXT}$",
     re.IGNORECASE,
 )
 
