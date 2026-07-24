@@ -16,6 +16,7 @@ from amplify_media_migrator.cli import (
     export,
     main,
     migrate,
+    observations_without_media,
     review,
     scan,
     show,
@@ -30,6 +31,8 @@ from amplify_media_migrator.config import (
 )
 from amplify_media_migrator.migration.engine import MigrationEngine
 from amplify_media_migrator.migration.progress import FileStatus, ProgressTracker
+from amplify_media_migrator.targets.graphql_client import GraphQLClient, Observation
+from amplify_media_migrator.utils.exceptions import GraphQLError
 
 pytestmark = pytest.mark.unit
 
@@ -986,6 +989,125 @@ class TestStatusCommand:
         result = runner.invoke(main, ["status"])
         assert result.exit_code != 0
         assert "Missing option" in result.output or "required" in result.output.lower()
+
+
+class TestObservationsWithoutMediaCommand:
+    @patch("amplify_media_migrator.cli.GraphQLClient")
+    @patch("amplify_media_migrator.cli._authenticate_cognito")
+    @patch("amplify_media_migrator.cli._load_config")
+    def test_writes_sorted_json_to_given_output(
+        self,
+        mock_load: MagicMock,
+        mock_auth_c: MagicMock,
+        mock_gql_cls: MagicMock,
+        runner: CliRunner,
+        tmp_path: Path,
+    ) -> None:
+        mock_cfg = MagicMock()
+        mock_cfg.get.side_effect = lambda key: "test-value"
+        mock_load.return_value = mock_cfg
+        mock_auth_c.return_value = ("test-token", MagicMock())
+        mock_gql = MagicMock()
+        mock_gql.list_observations_without_media.return_value = [
+            Observation(id="obs-2", sequential_id=200),
+            Observation(id="obs-1", sequential_id=100),
+        ]
+        mock_gql_cls.return_value = mock_gql
+
+        output_file = tmp_path / "out.json"
+        result = runner.invoke(
+            main,
+            ["observations-without-media", "--output", str(output_file)],
+        )
+
+        assert result.exit_code == 0
+        assert "Found 2 observation" in result.output
+        data = json.loads(output_file.read_text())
+        assert data == [
+            {"id": "obs-1", "sequentialId": 100},
+            {"id": "obs-2", "sequentialId": 200},
+        ]
+
+    @patch("amplify_media_migrator.cli.GraphQLClient")
+    @patch("amplify_media_migrator.cli._authenticate_cognito")
+    @patch("amplify_media_migrator.cli._load_config")
+    def test_empty_result_writes_empty_array_and_message(
+        self,
+        mock_load: MagicMock,
+        mock_auth_c: MagicMock,
+        mock_gql_cls: MagicMock,
+        runner: CliRunner,
+        tmp_path: Path,
+    ) -> None:
+        mock_cfg = MagicMock()
+        mock_cfg.get.side_effect = lambda key: "test-value"
+        mock_load.return_value = mock_cfg
+        mock_auth_c.return_value = ("test-token", MagicMock())
+        mock_gql = MagicMock()
+        mock_gql.list_observations_without_media.return_value = []
+        mock_gql_cls.return_value = mock_gql
+
+        output_file = tmp_path / "out.json"
+        result = runner.invoke(
+            main,
+            ["observations-without-media", "--output", str(output_file)],
+        )
+
+        assert result.exit_code == 0
+        assert "No observations without media found" in result.output
+        assert json.loads(output_file.read_text()) == []
+
+    @patch("amplify_media_migrator.cli.GraphQLClient")
+    @patch("amplify_media_migrator.cli._authenticate_cognito")
+    @patch("amplify_media_migrator.cli._load_config")
+    def test_default_output_path_used_when_not_provided(
+        self,
+        mock_load: MagicMock,
+        mock_auth_c: MagicMock,
+        mock_gql_cls: MagicMock,
+        runner: CliRunner,
+        tmp_path: Path,
+    ) -> None:
+        mock_cfg = MagicMock()
+        mock_cfg.get.side_effect = lambda key: "test-value"
+        mock_load.return_value = mock_cfg
+        mock_auth_c.return_value = ("test-token", MagicMock())
+        mock_gql = MagicMock()
+        mock_gql.list_observations_without_media.return_value = []
+        mock_gql_cls.return_value = mock_gql
+
+        default_dir = tmp_path / "fake-home"
+        with patch("amplify_media_migrator.cli.DEFAULT_PROGRESS_DIR", default_dir):
+            result = runner.invoke(main, ["observations-without-media"])
+
+        assert result.exit_code == 0
+        expected_path = default_dir / "observations_without_media.json"
+        assert expected_path.exists()
+
+    @patch("amplify_media_migrator.cli.GraphQLClient")
+    @patch("amplify_media_migrator.cli._authenticate_cognito")
+    @patch("amplify_media_migrator.cli._load_config")
+    def test_graphql_error_exits_with_code_1(
+        self,
+        mock_load: MagicMock,
+        mock_auth_c: MagicMock,
+        mock_gql_cls: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        mock_cfg = MagicMock()
+        mock_cfg.get.side_effect = lambda key: "test-value"
+        mock_load.return_value = mock_cfg
+        mock_auth_c.return_value = ("test-token", MagicMock())
+        mock_gql = MagicMock()
+        mock_gql.list_observations_without_media.side_effect = GraphQLError(
+            "boom", operation="ListObservationsForMediaCheck"
+        )
+        mock_gql_cls.return_value = mock_gql
+
+        result = runner.invoke(main, ["observations-without-media"])
+
+        assert result.exit_code == 1
+        assert "Error" in result.output
 
 
 class TestMigrateKeepAwake:
