@@ -366,6 +366,109 @@ class TestGetObservationsBySequentialIds:
         mock_post.assert_not_called()
 
 
+class TestListObservationsWithoutMedia:
+    @patch("requests.Session.post")
+    def test_filters_observations_with_no_media_items(
+        self, mock_post: MagicMock, connected_client: GraphQLClient
+    ) -> None:
+        mock_post.return_value = _make_response(
+            json_data={
+                "data": {
+                    "listObservations": {
+                        "items": [
+                            {
+                                "id": "obs-1",
+                                "sequentialId": 100,
+                                "media": {"items": []},
+                            },
+                            {
+                                "id": "obs-2",
+                                "sequentialId": 101,
+                                "media": {"items": [{"id": "media-a"}]},
+                            },
+                        ],
+                        "nextToken": None,
+                    }
+                }
+            }
+        )
+
+        result = connected_client.list_observations_without_media()
+
+        assert len(result) == 1
+        assert result[0].id == "obs-1"
+        assert result[0].sequential_id == 100
+
+    @patch("requests.Session.post")
+    def test_paginates_across_multiple_pages(
+        self, mock_post: MagicMock, connected_client: GraphQLClient
+    ) -> None:
+        mock_post.side_effect = [
+            _make_response(
+                json_data={
+                    "data": {
+                        "listObservations": {
+                            "items": [
+                                {
+                                    "id": "obs-1",
+                                    "sequentialId": 100,
+                                    "media": {"items": []},
+                                }
+                            ],
+                            "nextToken": "token-2",
+                        }
+                    }
+                }
+            ),
+            _make_response(
+                json_data={
+                    "data": {
+                        "listObservations": {
+                            "items": [
+                                {
+                                    "id": "obs-2",
+                                    "sequentialId": 200,
+                                    "media": {"items": []},
+                                }
+                            ],
+                            "nextToken": None,
+                        }
+                    }
+                }
+            ),
+        ]
+
+        result = connected_client.list_observations_without_media()
+
+        assert {o.id for o in result} == {"obs-1", "obs-2"}
+        assert mock_post.call_count == 2
+
+    @patch("requests.Session.post")
+    def test_returns_empty_list_when_all_observations_have_media(
+        self, mock_post: MagicMock, connected_client: GraphQLClient
+    ) -> None:
+        mock_post.return_value = _make_response(
+            json_data={
+                "data": {
+                    "listObservations": {
+                        "items": [
+                            {
+                                "id": "obs-1",
+                                "sequentialId": 100,
+                                "media": {"items": [{"id": "m1"}]},
+                            }
+                        ],
+                        "nextToken": None,
+                    }
+                }
+            }
+        )
+
+        result = connected_client.list_observations_without_media()
+
+        assert result == []
+
+
 class TestCreateMedia:
     @patch("requests.Session.post")
     def test_creates_image_media(
