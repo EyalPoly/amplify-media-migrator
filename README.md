@@ -203,6 +203,20 @@ amplify-media-migrator export --folder-id FOLDER_ID --status duplicate --output 
 
 Valid `--status` values: `failed`, `orphan`, `needs_review`, `partial`, `duplicate`.
 
+### Observations Without Media
+
+Audit the live database for Observations with no linked Media at all — independent
+of any specific migration run or its progress file:
+
+```bash
+amplify-media-migrator observations-without-media --output missing_media.json
+```
+
+Writes a JSON array of `{ "id": ..., "sequentialId": ... }`, sorted by
+`sequentialId`, to `--output` or the default
+`~/.amplify-media-migrator/observations_without_media.json`. Only requires
+Cognito authentication — no Google Drive access, no `--folder-id`.
+
 ### Deduplication
 
 Before processing, the migrator skips byte-identical copies: files sharing the
@@ -264,6 +278,7 @@ for a `sequentialId` (legacy behaviour).
 | `migrate --folder-id ID [--rescan] [--retry-orphans] [--dry-run]` | Run or resume migration. Safe to re-run; retries failures automatically. `--rescan` re-lists Drive for new files; `--retry-orphans` re-processes orphan files |
 | `status --folder-id ID` | Show migration progress |
 | `export --folder-id ID --status STATUS --output FILE` | Export files by status |
+| `observations-without-media [--output FILE]` | List observations with no linked media records |
 
 ## Troubleshooting
 
