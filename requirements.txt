@@ -12,7 +12,7 @@ python-dateutil>=2.9.0.post0
 
 # UI
 rich>=15.0.0
-tqdm>=4.68.4
+tqdm>=4.69.0
 
 # Dev dependencies
 pytest>=9.1.1
