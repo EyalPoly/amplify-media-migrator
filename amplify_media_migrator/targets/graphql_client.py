@@ -82,6 +82,23 @@ query GetMediaByUrl($url: String!, $nextToken: String) {
 }
 """
 
+_QUERY_LIST_OBSERVATIONS_WITHOUT_MEDIA = """
+query ListObservationsForMediaCheck($nextToken: String) {
+  listObservations(limit: 1000, nextToken: $nextToken) {
+    items {
+      id
+      sequentialId
+      media(limit: 1) {
+        items {
+          id
+        }
+      }
+    }
+    nextToken
+  }
+}
+"""
+
 
 class GraphQLClient:
     def __init__(
@@ -307,6 +324,33 @@ class GraphQLClient:
             if observation is not None:
                 results[seq_id] = observation
         return results
+
+    def list_observations_without_media(self) -> List[Observation]:
+        results: List[Observation] = []
+        next_token: Optional[str] = None
+
+        while True:
+            variables: Dict[str, Any] = {}
+            if next_token:
+                variables["nextToken"] = next_token
+
+            data = self._execute(
+                _QUERY_LIST_OBSERVATIONS_WITHOUT_MEDIA,
+                variables=variables,
+                operation="ListObservationsForMediaCheck",
+            )
+
+            list_data = data.get("listObservations", {})
+            for item in list_data.get("items", []):
+                media_items = item.get("media", {}).get("items", [])
+                if not media_items:
+                    results.append(
+                        Observation(id=item["id"], sequential_id=item["sequentialId"])
+                    )
+
+            next_token = list_data.get("nextToken")
+            if not next_token:
+                return results
 
     def create_media(
         self,

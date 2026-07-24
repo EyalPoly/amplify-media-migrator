@@ -15,7 +15,7 @@ from .config import ConfigManager, ConfigurationError, config_to_dict
 from .migration.concurrency import AdaptiveSettings
 from .migration.engine import MigrationEngine
 from .migration.mapper import FilenameMapper
-from .migration.progress import FileStatus, ProgressTracker
+from .migration.progress import DEFAULT_PROGRESS_DIR, FileStatus, ProgressTracker
 from .utils.logger import DEFAULT_LOG_FORMAT
 from .sources.google_drive import GoogleDriveClient
 from .targets.amplify_storage import AmplifyStorageClient
@@ -659,6 +659,56 @@ def status(folder_id: str) -> None:
         click.echo(f"\n  Progress:       {pct:.1f}%")
     else:
         click.echo(f"\n  Progress:       0.0%")
+
+
+@main.command()
+@click.option(
+    "--output",
+    default=None,
+    help=(
+        "Output JSON file path "
+        "(default: ~/.amplify-media-migrator/observations_without_media.json)"
+    ),
+)
+def observations_without_media(output: Optional[str]) -> None:
+    """List observations with no linked media records."""
+    cfg = _load_config()
+    id_token, _ = _authenticate_cognito(cfg)
+
+    graphql_client = GraphQLClient(
+        api_endpoint=cfg.get("aws.amplify.api_endpoint"),
+        region=cfg.get("aws.region"),
+    )
+    graphql_client.connect(id_token)
+
+    click.echo("Fetching observations without linked media...")
+
+    try:
+        observations = graphql_client.list_observations_without_media()
+    except MigratorError as e:
+        click.echo(f"\nError: {e}", err=True)
+        raise SystemExit(1)
+
+    output_path = (
+        Path(output)
+        if output
+        else DEFAULT_PROGRESS_DIR / "observations_without_media.json"
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    sorted_observations = sorted(observations, key=lambda o: o.sequential_id)
+    payload = [
+        {"id": o.id, "sequentialId": o.sequential_id} for o in sorted_observations
+    ]
+    output_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+    if not payload:
+        click.echo(f"\nNo observations without media found. Written to {output_path}")
+    else:
+        click.echo(
+            f"\nFound {len(payload)} observation(s) without linked media."
+            f"\nWritten to {output_path}"
+        )
 
 
 if __name__ == "__main__":
