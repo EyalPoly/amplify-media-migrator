@@ -388,7 +388,12 @@ def _print_summary(summary: dict) -> None:
 
 @main.command()
 @click.option("--folder-id", required=True, help="Google Drive folder ID")
-def scan(folder_id: str) -> None:
+@click.option(
+    "--no-recursive",
+    is_flag=True,
+    help="Only list files directly in the folder; do not descend into subfolders",
+)
+def scan(folder_id: str, no_recursive: bool) -> None:
     """Scan Google Drive folder and validate file mappings (dry-run)."""
     cfg = _load_config()
     drive_client = _authenticate_google(cfg)
@@ -412,7 +417,7 @@ def scan(folder_id: str) -> None:
     )
 
     try:
-        pattern_counts = asyncio.run(engine.scan(folder_id))
+        pattern_counts = asyncio.run(engine.scan(folder_id, recursive=not no_recursive))
     except MigratorError as e:
         click.echo(f"\nError: {e}", err=True)
         raise SystemExit(1)
@@ -439,12 +444,18 @@ def scan(folder_id: str) -> None:
 @click.option(
     "--retry-orphans", is_flag=True, help="Retry files previously marked as orphan"
 )
+@click.option(
+    "--no-recursive",
+    is_flag=True,
+    help="Only list files directly in the folder; do not descend into subfolders",
+)
 @click.option("--verbose", is_flag=True, help="Enable debug logging")
 def migrate(
     folder_id: str,
     dry_run: bool,
     rescan: bool,
     retry_orphans: bool,
+    no_recursive: bool,
     verbose: bool,
 ) -> None:
     """Run or resume the media migration.
@@ -484,7 +495,13 @@ def migrate(
     try:
         with KeepAwake():
             _run_with_progress(
-                lambda: engine.migrate(folder_id, dry_run, retry_orphans, rescan),
+                lambda: engine.migrate(
+                    folder_id,
+                    dry_run,
+                    retry_orphans,
+                    rescan,
+                    recursive=not no_recursive,
+                ),
                 engine,
                 desc="Migrating",
             )

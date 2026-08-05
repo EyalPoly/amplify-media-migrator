@@ -114,11 +114,11 @@ class MigrationEngine:
         threading.Thread(target=_loop, daemon=True, name="autosave").start()
         return stop
 
-    async def scan(self, folder_id: str) -> Dict[str, int]:
+    async def scan(self, folder_id: str, recursive: bool = True) -> Dict[str, int]:
         self._progress.load(folder_id)
 
         files = await asyncio.to_thread(
-            lambda: list(self._drive_client.list_files(folder_id))
+            lambda: list(self._drive_client.list_files(folder_id, recursive=recursive))
         )
 
         self._progress.set_total_files(len(files))
@@ -160,6 +160,7 @@ class MigrationEngine:
         dry_run: bool = False,
         retry_orphans: bool = False,
         rescan: bool = False,
+        recursive: bool = True,
     ) -> None:
         asyncio.get_running_loop().set_default_executor(
             concurrent.futures.ThreadPoolExecutor(max_workers=self._concurrency)
@@ -170,7 +171,7 @@ class MigrationEngine:
         do_scan = (not self._progress.files) or rescan
         if do_scan:
             files_to_process = await self._build_work_with_scan(
-                folder_id, dry_run, retry_orphans
+                folder_id, dry_run, retry_orphans, recursive
             )
         else:
             files_to_process = await self._build_work_from_progress(retry_orphans)
@@ -203,10 +204,14 @@ class MigrationEngine:
                 )
 
     async def _build_work_with_scan(
-        self, folder_id: str, dry_run: bool, retry_orphans: bool
+        self,
+        folder_id: str,
+        dry_run: bool,
+        retry_orphans: bool,
+        recursive: bool = True,
     ) -> List[DriveFile]:
         files = await asyncio.to_thread(
-            lambda: list(self._drive_client.list_files(folder_id))
+            lambda: list(self._drive_client.list_files(folder_id, recursive=recursive))
         )
         self._progress.set_total_files(len(files))
 
