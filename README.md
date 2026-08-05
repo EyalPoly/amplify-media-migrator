@@ -128,6 +128,13 @@ Dry-run scan to validate file naming patterns without uploading:
 amplify-media-migrator scan --folder-id FOLDER_ID
 ```
 
+Files are listed recursively by default (subfolders are traversed). Pass
+`--no-recursive` to only list files directly inside `FOLDER_ID`:
+
+```bash
+amplify-media-migrator scan --folder-id FOLDER_ID --no-recursive
+```
+
 ### 4. Review
 
 Inspect files with invalid naming patterns:
@@ -164,6 +171,9 @@ amplify-media-migrator migrate --folder-id FOLDER_ID --retry-orphans
 ```
 
 Use `--dry-run` to validate without downloading or uploading.
+
+Like `scan`, `migrate` recurses into subfolders by default; pass
+`--no-recursive` to only process files directly inside `FOLDER_ID`.
 
 #### Keeping the machine awake
 
@@ -273,9 +283,9 @@ for a `sequentialId` (legacy behaviour).
 | `config` | Interactive configuration setup |
 | `show` | Display current configuration |
 | `validate --folder-id ID` | Pre-flight service connectivity checks |
-| `scan --folder-id ID` | Scan folder and validate file patterns |
+| `scan --folder-id ID [--no-recursive]` | Scan folder and validate file patterns. Recurses into subfolders unless `--no-recursive` is passed |
 | `review --folder-id ID` | Show files needing manual review |
-| `migrate --folder-id ID [--rescan] [--retry-orphans] [--dry-run]` | Run or resume migration. Safe to re-run; retries failures automatically. `--rescan` re-lists Drive for new files; `--retry-orphans` re-processes orphan files |
+| `migrate --folder-id ID [--rescan] [--retry-orphans] [--dry-run] [--no-recursive]` | Run or resume migration. Safe to re-run; retries failures automatically. `--rescan` re-lists Drive for new files; `--retry-orphans` re-processes orphan files; `--no-recursive` only lists files directly in the folder |
 | `status --folder-id ID` | Show migration progress |
 | `export --folder-id ID --status STATUS --output FILE` | Export files by status |
 | `observations-without-media [--output FILE]` | List observations with no linked media records |
