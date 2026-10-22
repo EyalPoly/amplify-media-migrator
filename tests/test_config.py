@@ -36,6 +36,7 @@ def sample_config_dict():
                 "client_id": "test_client_id",
                 "identity_pool_id": "eu-west-1:test-identity-pool-id",
                 "username": "test@example.com",
+                "admin_group_name": "SUPER_ADMINS",
             },
             "amplify": {
                 "api_endpoint": "https://test.appsync-api.eu-west-1.amazonaws.com/graphql",
@@ -150,6 +151,16 @@ class TestConfigSerialization:
         config = config_from_dict(sample_config_dict)
         result = config_to_dict(config)
         assert result == sample_config_dict
+
+    def test_admin_group_defaults_to_super_admins(self):
+        config = config_from_dict({"aws": {"cognito": {"user_pool_id": "pool"}}})
+        assert config.aws.cognito.admin_group_name == "SUPER_ADMINS"
+
+    def test_admin_group_can_be_overridden(self):
+        config = config_from_dict(
+            {"aws": {"cognito": {"admin_group_name": "ISRAEL_ADMIN"}}}
+        )
+        assert config.aws.cognito.admin_group_name == "ISRAEL_ADMIN"
 
     def test_partial_dict_uses_defaults(self):
         partial = {"aws": {"region": "us-west-2"}}

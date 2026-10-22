@@ -19,7 +19,7 @@ CLI tool to migrate media files (photos/videos) from Google Drive to AWS Amplify
 - Python 3.9+
 - Google Cloud project with Drive API enabled
 - AWS account with Amplify backend deployed (S3 bucket, AppSync API, Cognito)
-- Cognito user in the ADMINS group
+- Cognito user in the SUPER_ADMINS group (configurable via `aws.cognito.admin_group_name`)
 
 ## Installation
 
@@ -68,7 +68,9 @@ The Amplify backend must already be deployed. You need the following values from
 1. Go to the [Amazon Cognito Console](https://console.aws.amazon.com/cognito)
 2. Select your **User Pool** — copy the **User Pool ID** and **App client ID** from the App integration tab
 3. Select your **Identity Pool** — copy the **Identity Pool ID**
-4. Ensure your user is in the **ADMINS** group
+4. Ensure your user is in the **SUPER_ADMINS** group. Storage access is granted per team
+   prefix (`media/<TEAM>/*`), and only `SUPER_ADMINS` can write under every team's prefix.
+   To require a different group, set `aws.cognito.admin_group_name` in the config file.
 
 ## Configuration
 
@@ -118,7 +120,9 @@ Run pre-flight checks to verify all services are accessible:
 amplify-media-migrator validate --folder-id FOLDER_ID
 ```
 
-Checks: config, Google Drive auth, folder access, Cognito auth, S3 bucket, GraphQL endpoint.
+Checks: config, Google Drive auth, folder access, Cognito auth, GraphQL endpoint, teams
+(`Group` records), and S3 write access — a small probe object is written to and deleted from the
+first team's `media/<TEAM>/` prefix.
 
 ### 3. Scan
 
@@ -248,6 +252,17 @@ are performed; checksums come from Drive metadata.
 
 Files that don't match any pattern are marked as `needs_review`.
 
+### Storage keys and teams
+
+Each file is uploaded once to `media/<TEAM>/<original filename>`, where `<TEAM>` is the owning
+team of its observations (from their `editorGroups`, e.g. `ISRAEL_USER` → `ISRAEL`). Every
+`Media` record stores that bare key in `url` — the app signs it when displaying the image — and
+gets the observation's `editorGroups`.
+
+A file is marked `failed` (with the reason in its error) when one of its observations has no
+team, or when its observations belong to different teams, since one object can only live under
+one team's prefix.
+
 ### Prefix-based disambiguation (reused sequentialId)
 
 When `sequentialId` is reused across datasets, a single-letter filename prefix selects which
@@ -296,7 +311,8 @@ for a `sequentialId` (legacy behaviour).
 |---|---|
 | "Token expired" | Delete `~/.amplify-media-migrator/google_token.json` and re-authenticate |
 | "Access denied to Drive folder" | Ensure the folder is shared with your OAuth account |
-| "User not in ADMINS group" | Add the user to ADMINS in the Cognito console |
+| "User is not in SUPER_ADMINS group" | Add the user to SUPER_ADMINS in the Cognito console |
+| "Observation has no resolvable team" | The observation's `editorGroups` is empty or mixes teams; fix it in the app, then re-run |
 | "S3 bucket not found" | Deploy Amplify storage first |
 | "Observation not found" | Verify the sequentialId exists, check the filename pattern |
 | "Rate limit exceeded" | Reduce `migration.max_workers` in config |

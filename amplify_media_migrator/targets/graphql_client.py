@@ -1,7 +1,7 @@
 import logging
 import re
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, NoReturn, Optional, Set
 
 import requests
@@ -17,11 +17,25 @@ from ..utils.media import MediaType
 logger = logging.getLogger(__name__)
 
 
+_TEAM_ROLE_SUFFIX_RE = re.compile(r"_(USER|ADMIN)$")
+
+
 @dataclass
 class Observation:
     id: str
     sequential_id: int
     discriminator_value: Optional[str] = None
+    editor_groups: List[str] = field(default_factory=list)
+
+    @property
+    def team_slug(self) -> Optional[str]:
+        """The owning team, from its `<TEAM>_USER` / `<TEAM>_ADMIN` editor groups."""
+        slugs = {
+            _TEAM_ROLE_SUFFIX_RE.sub("", group)
+            for group in self.editor_groups
+            if _TEAM_ROLE_SUFFIX_RE.search(group)
+        }
+        return slugs.pop() if len(slugs) == 1 else None
 
 
 @dataclass
@@ -47,7 +61,8 @@ query GetObservationBySequentialId($sequentialId: Int!, $nextToken: String) {{
   listObservations(filter: {{ sequentialId: {{ eq: $sequentialId }} }}, limit: 10000, nextToken: $nextToken) {{
     items {{
       id
-      sequentialId{extra}
+      sequentialId
+      editorGroups{extra}
     }}
     nextToken
   }}
@@ -63,6 +78,18 @@ mutation CreateMedia($input: CreateMediaInput!) {
     observationId
     type
     isAvailableForPublicUse
+  }
+}
+"""
+
+_QUERY_LIST_GROUPS = """
+query ListGroups($nextToken: String) {
+  listGroups(limit: 1000, nextToken: $nextToken) {
+    items {
+      name
+      slug
+    }
+    nextToken
   }
 }
 """
@@ -98,6 +125,10 @@ query ListObservationsForMediaCheck($nextToken: String) {
   }
 }
 """
+
+
+def _editor_groups(item: Dict[str, Any]) -> List[str]:
+    return [group for group in item.get("editorGroups") or [] if group]
 
 
 class GraphQLClient:
@@ -273,6 +304,7 @@ class GraphQLClient:
                     discriminator_value=(
                         item.get(discriminator_field) if discriminator_field else None
                     ),
+                    editor_groups=_editor_groups(item),
                 )
 
             next_token = list_data.get("nextToken")
@@ -308,6 +340,7 @@ class GraphQLClient:
                             if discriminator_field
                             else None
                         ),
+                        editor_groups=_editor_groups(item),
                     )
                 )
 
@@ -358,17 +391,19 @@ class GraphQLClient:
         observation_id: str,
         media_type: MediaType,
         is_public: bool = False,
+        editor_groups: Optional[List[str]] = None,
     ) -> Media:
+        media_input: Dict[str, Any] = {
+            "url": url,
+            "observationId": observation_id,
+            "type": media_type.value,
+            "isAvailableForPublicUse": is_public,
+        }
+        if editor_groups:
+            media_input["editorGroups"] = editor_groups
         data = self._execute(
             _MUTATION_CREATE_MEDIA,
-            variables={
-                "input": {
-                    "url": url,
-                    "observationId": observation_id,
-                    "type": media_type.value,
-                    "isAvailableForPublicUse": is_public,
-                }
-            },
+            variables={"input": media_input},
             operation="CreateMedia",
         )
 
@@ -380,6 +415,29 @@ class GraphQLClient:
             type=MediaType(item["type"]),
             is_available_for_public_use=item["isAvailableForPublicUse"],
         )
+
+    def list_team_slugs(self) -> List[str]:
+        slugs: Set[str] = set()
+        next_token: Optional[str] = None
+
+        while True:
+            variables: Dict[str, Any] = {}
+            if next_token:
+                variables["nextToken"] = next_token
+
+            data = self._execute(
+                _QUERY_LIST_GROUPS, variables=variables, operation="ListGroups"
+            )
+
+            list_data = data.get("listGroups", {})
+            for item in list_data.get("items", []):
+                slug = item.get("slug") or item.get("name")
+                if slug:
+                    slugs.add(slug.strip().upper())
+
+            next_token = list_data.get("nextToken")
+            if not next_token:
+                return sorted(slugs)
 
     def get_media_observation_ids_by_url(self, url: str) -> Set[str]:
         observation_ids: Set[str] = set()

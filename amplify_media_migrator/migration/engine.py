@@ -521,9 +521,31 @@ class MigrationEngine:
             self._reporter.on_file_done(file.id, FileStatus.ORPHAN)
             return
 
-        first_obs = next(iter(observations.values()))
-        s3_key = self._mapper.build_s3_key(first_obs.id, file.name)
-        s3_url = self._storage_client.get_url(s3_key)
+        team_slugs = {obs.team_slug for obs in observations.values()}
+        if None in team_slugs:
+            self._mark_failed(
+                file,
+                parsed,
+                "Observation has no resolvable team (editorGroups): "
+                + ", ".join(
+                    str(seq_id)
+                    for seq_id, obs in observations.items()
+                    if obs.team_slug is None
+                ),
+            )
+            return
+        if len(team_slugs) > 1:
+            # One object can only live under one team's storage prefix.
+            self._mark_failed(
+                file,
+                parsed,
+                f"Observations span multiple teams: {', '.join(sorted(map(str, team_slugs)))}",
+            )
+            return
+
+        s3_key = self._mapper.build_s3_key(str(team_slugs.pop()), file.name)
+        # Media.url holds the bare storage key; the app signs it on read.
+        s3_url = s3_key
 
         if s3_url in self._uploaded_urls:
             self._progress.update_file(
@@ -566,9 +588,6 @@ class MigrationEngine:
             self._reporter.on_file_done(file.id, FileStatus.COMPLETED)
             return
 
-        # If this file was previously uploaded (interrupted after S3 upload but
-        # before media record creation), reuse the stored S3 URL and skip
-        # the download/upload entirely.
         def _metered_callback() -> Callable[[int], None]:
             # download_file and the cumulative-wrapped upload both report a
             # per-phase cumulative count; convert to deltas for the global
@@ -583,13 +602,22 @@ class MigrationEngine:
 
             return _cb
 
-        if stored and stored.status == FileStatus.UPLOADED and stored.s3_url:
-            s3_url = stored.s3_url
+        # A run interrupted after the S3 upload but before media record creation
+        # can skip the transfer — but only if the stored key is still this one:
+        # the key carries the team, and the observation may have been moved to
+        # another team since, leaving the old object unreadable to its new team.
+        already_uploaded = (
+            stored is not None
+            and stored.status == FileStatus.UPLOADED
+            and stored.s3_url == s3_key
+        )
+        if already_uploaded:
+            logger.debug("Reusing earlier upload of %s", s3_key)
         elif file.size == 0 or file.size > self._large_file_threshold_bytes:
             self._reporter.on_file_phase(file.id, "uploading")
             content_type = get_content_type(parsed.extension)
             try:
-                s3_url = await self._stream_upload_with_retry(
+                await self._stream_upload_with_retry(
                     file, s3_key, content_type, _metered_callback()
                 )
             except AuthenticationError:
@@ -626,7 +654,7 @@ class MigrationEngine:
                 self._reporter.on_file_phase(file.id, "uploading")
                 content_type = get_content_type(parsed.extension)
                 try:
-                    s3_url = await self._upload_with_retry(
+                    await self._upload_with_retry(
                         file, data, s3_key, content_type, _metered_callback()
                     )
                 except AuthenticationError:
@@ -659,6 +687,7 @@ class MigrationEngine:
                     obs.id,
                     media_type,
                     self._default_media_public,
+                    obs.editor_groups,
                 )
                 media_ids.append(media.id)
                 observation_ids.append(obs.id)
@@ -918,6 +947,7 @@ class MigrationEngine:
         observation_id: str,
         media_type: MediaType,
         is_public: bool,
+        editor_groups: Optional[List[str]] = None,
     ) -> Media:
         last_error: Optional[MigratorError] = None
         for attempt in range(self._retry_attempts):
@@ -928,6 +958,7 @@ class MigrationEngine:
                     observation_id,
                     media_type,
                     is_public,
+                    editor_groups,
                 )
             except RateLimitError as e:
                 last_error = e

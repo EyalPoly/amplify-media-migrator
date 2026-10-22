@@ -133,5 +133,6 @@ class FilenameMapper:
     def is_valid_extension(self, extension: str) -> bool:
         return extension.lower().lstrip(".") in VALID_EXTENSIONS
 
-    def build_s3_key(self, observation_id: str, filename: str) -> str:
-        return f"media/{observation_id}/{filename}"
+    def build_s3_key(self, team_slug: str, filename: str) -> str:
+        # Storage access is granted per team prefix, so the team must lead the key.
+        return f"media/{team_slug}/{filename}"

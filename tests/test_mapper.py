@@ -369,16 +369,16 @@ class TestParsedFilenameDataclass:
 
 class TestBuildS3Key:
     def test_basic(self, mapper: FilenameMapper) -> None:
-        key = mapper.build_s3_key("abc-123", "12345.jpg")
-        assert key == "media/abc-123/12345.jpg"
+        key = mapper.build_s3_key("ISRAEL", "12345.jpg")
+        assert key == "media/ISRAEL/12345.jpg"
 
     def test_range_filename(self, mapper: FilenameMapper) -> None:
-        key = mapper.build_s3_key("obs-abc", "6000-6001.jpg")
-        assert key == "media/obs-abc/6000-6001.jpg"
+        key = mapper.build_s3_key("GREECE", "6000-6001.jpg")
+        assert key == "media/GREECE/6000-6001.jpg"
 
     def test_multiple_filename(self, mapper: FilenameMapper) -> None:
-        key = mapper.build_s3_key("obs-def", "6602a.jpg")
-        assert key == "media/obs-def/6602a.jpg"
+        key = mapper.build_s3_key("ISRAEL", "6602a.jpg")
+        assert key == "media/ISRAEL/6602a.jpg"
 
 
 class TestPrefix:

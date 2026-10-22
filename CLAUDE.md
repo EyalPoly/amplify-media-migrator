@@ -28,14 +28,15 @@ CLI tool to migrate ~20,000 media files (photos/videos) from Google Drive to AWS
       - Invalid: Mark as "needs_review", skip to next file
 
    b. For each sequentialId extracted:
-      - Query Observation by sequentialId → get observation.id
+      - Query Observation by sequentialId → get observation.id and editorGroups (its team)
       - If not found: Mark as orphan for this sequentialId
 
    c. If at least one observation found:
+      - Fail the file if an observation has no team or the observations span teams
       - Download file from Google Drive (once, regardless of # observations)
-      - Upload to S3 using first observation.id in key (once)
+      - Upload to S3 under the team's prefix: media/<TEAM>/<filename> (once)
       - For each valid observation.id:
-        * Create Media record with observationId and S3 URL
+        * Create Media record with observationId, the bare S3 key as url, and editorGroups
 
    d. Update progress tracker:
       - completed: All observations linked successfully
@@ -75,8 +76,8 @@ Files follow these patterns:
 - **Examples**:
   - `6000-6001.jpg` → creates Media records for BOTH observations 6000 and 6001
   - `1200-1205.mp4` → creates Media records for observations 1200, 1201, 1202, 1203, 1204, 1205
-- **Mapping**: 1 file → Multiple observations (same S3 URL reused)
-- **S3 storage**: File stored once using first sequentialId in key
+- **Mapping**: 1 file → Multiple observations (same S3 key reused)
+- **S3 storage**: File stored once under the observations' shared team prefix
 
 #### Invalid Patterns (mark as "needs_review" status)
 Files that don't match any valid pattern:
@@ -98,48 +99,53 @@ Files that don't match any valid pattern:
 #### Observation Model
 ```typescript
 sequentialId: a.integer().required(),  // Indexed - use for lookup
+editorGroups: a.string().array(),      // ["<TEAM>_USER", "<TEAM>_ADMIN"] — the owning team
 media: a.hasMany("Media", "observationId"),
 ```
 
 #### Media Model
 ```typescript
-url: a.url().required(),              // S3 URL after upload
+url: a.string().required(),           // Bare S3 key (media/<TEAM>/...); the app signs it on read
 type: a.enum(['PHOTO', 'VIDEO']),     // Derived from file extension
 observationId: a.id().required(),     // FK to Observation.id
 isAvailableForPublicUse: a.boolean().required(),  // Default: false
+editorGroups: a.string().array(),     // Copied from the observation; scopes reads to its team
 ```
+
+### Permissions
+MECO uses team-based Cognito groups: `SUPER_ADMINS`, `<TEAM>_USER`, `<TEAM>_ADMIN`.
+Storage access is granted only under `media/<TEAM>/*`, so every key must start with the
+observation's team. The migrator authenticates as `SUPER_ADMINS` (the only group that can write
+under every team's prefix); `aws.cognito.admin_group_name` overrides it.
 
 ### S3 Key Format
 ```
-media/{first_observation_id}/{original_filename}
+media/{team}/{original_filename}      # team = observation editorGroups minus _USER/_ADMIN
 
 Examples:
 
 1. Single media:
    Input: 12345.jpg
-   Query: sequentialId=12345 → observation.id = "abc-123"
-   S3 key: media/abc-123/12345.jpg
-   S3 URL: https://bucket.s3.region.amazonaws.com/media/abc-123/12345.jpg
+   Query: sequentialId=12345 → observation "abc-123", editorGroups ["ISRAEL_USER", "ISRAEL_ADMIN"]
+   S3 key / Media.url: media/ISRAEL/12345.jpg
    Media records: 1 (for observation abc-123)
 
 2. Multiple media (same observation):
    Input: 6602.jpg, 6602a.jpg, 6602b.jpg
-   Query: sequentialId=6602 → observation.id = "def-456"
+   Query: sequentialId=6602 → observation "def-456" (team ISRAEL)
    S3 keys:
-     - media/def-456/6602.jpg
-     - media/def-456/6602a.jpg
-     - media/def-456/6602b.jpg
-   Media records: 3 (all for observation def-456, different S3 URLs)
+     - media/ISRAEL/6602.jpg
+     - media/ISRAEL/6602a.jpg
+     - media/ISRAEL/6602b.jpg
+   Media records: 3 (all for observation def-456, different keys)
 
 3. Range media (shared across observations):
    Input: 6000-6001.jpg
-   Query 1: sequentialId=6000 → observation.id = "ghi-789"
-   Query 2: sequentialId=6001 → observation.id = "jkl-012"
-   S3 key: media/ghi-789/6000-6001.jpg (stored once, using first observation.id)
-   S3 URL: https://bucket.s3.region.amazonaws.com/media/ghi-789/6000-6001.jpg
-   Media records: 2 (both point to same S3 URL)
-     - Media for observation ghi-789 (sequentialId=6000)
-     - Media for observation jkl-012 (sequentialId=6001)
+   Query 1: sequentialId=6000 → observation "ghi-789" (team GREECE)
+   Query 2: sequentialId=6001 → observation "jkl-012" (team GREECE)
+   S3 key / Media.url: media/GREECE/6000-6001.jpg (stored once)
+   Media records: 2 (both point to the same key)
+   If the observations belonged to different teams, the file is marked failed instead.
 ```
 
 ---
@@ -194,7 +200,7 @@ Examples:
       "status": "completed",
       "sequential_id": 12345,
       "observation_id": "abc-123",
-      "s3_url": "https://...",
+      "s3_url": "media/ISRAEL/12345.jpg",
       "media_id": "media-456",
       "error": null
     },
@@ -241,6 +247,7 @@ query GetObservationBySequentialId($sequentialId: Int!) {
     items {
       id
       sequentialId
+      editorGroups
     }
   }
 }
@@ -267,10 +274,11 @@ mutation CreateMedia($input: CreateMediaInput!) {
 **Input**:
 ```json
 {
-  "url": "https://bucket.s3.region.amazonaws.com/media/obs-id/12345.jpg",
+  "url": "media/ISRAEL/12345.jpg",
   "observationId": "abc-123-def",
   "type": "PHOTO",
-  "isAvailableForPublicUse": false
+  "isAvailableForPublicUse": false,
+  "editorGroups": ["ISRAEL_USER", "ISRAEL_ADMIN"]
 }
 ```
 
@@ -428,7 +436,7 @@ amplify-media-migrator/
 - Python 3.9+
 - Google Cloud project with Drive API enabled
 - AWS account with Amplify backend deployed
-- Cognito user in ADMINS group
+- Cognito user in SUPER_ADMINS group
 
 ### Installation
 ```bash
@@ -647,7 +655,8 @@ export LOG_LEVEL=DEBUG
 |-------|----------|
 | "Token expired" | Delete `google_token.json`, re-authenticate |
 | "Access denied to Drive folder" | Ensure folder is shared with OAuth account |
-| "User not in ADMINS group" | Add user to ADMINS in Cognito console |
+| "User is not in SUPER_ADMINS group" | Add user to SUPER_ADMINS in Cognito console |
+| "Observation has no resolvable team" | Its `editorGroups` is empty or mixes teams; fix it in the app |
 | "S3 bucket not found" | Deploy Amplify storage first (`npx ampx sandbox`) |
 | "Observation not found" | Verify sequentialId exists, check filename pattern |
 | "Rate limit exceeded" | Reduce `migration.max_workers` in config |
