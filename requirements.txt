@@ -1,6 +1,6 @@
 # Core dependencies
 amplify-auth>=0.1.1
-click>=8.4.2
+click>=8.5.0
 boto3>=1.43.46
 pycognito>=2024.5.1
 google-api-python-client>=2.198.0
