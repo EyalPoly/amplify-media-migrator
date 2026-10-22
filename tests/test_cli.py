@@ -291,6 +291,7 @@ class TestAuthenticateCognito:
             "aws.cognito.client_id": "client",
             "aws.region": "us-east-1",
             "aws.cognito.username": "user@test.com",
+            "aws.cognito.admin_group_name": "SUPER_ADMINS",
         }[key]
 
         mock_cognito = MagicMock()
@@ -301,6 +302,7 @@ class TestAuthenticateCognito:
         id_token, cognito = _authenticate_cognito(mock_cfg)
         assert id_token == "test-token"
         assert cognito is mock_cognito
+        assert mock_cognito_cls.call_args.kwargs["admin_group_name"] == "SUPER_ADMINS"
 
     @patch("amplify_media_migrator.cli.click.prompt", return_value="password")
     @patch("amplify_auth.CognitoAuthProvider")
@@ -865,10 +867,10 @@ class TestValidateCommand:
         mock_auth_g.return_value = mock_drive
         mock_auth_c.return_value = ("test-token", MagicMock())
         mock_storage = MagicMock()
-        mock_storage.file_exists.return_value = False
         mock_storage_cls.return_value = mock_storage
         mock_gql = MagicMock()
         mock_gql.get_observation_by_sequential_id.return_value = None
+        mock_gql.list_team_slugs.return_value = ["GREECE", "ISRAEL"]
         mock_gql_cls.return_value = mock_gql
 
         result = runner.invoke(main, ["validate", "--folder-id", "test-folder"])
@@ -877,9 +879,82 @@ class TestValidateCommand:
         assert "[PASS] Google Drive authentication" in result.output
         assert "[PASS] Google Drive folder access" in result.output
         assert "[PASS] Cognito authentication" in result.output
-        assert "[PASS] S3 bucket access" in result.output
         assert "[PASS] GraphQL endpoint" in result.output
+        assert "[PASS] Teams: GREECE, ISRAEL" in result.output
+        assert "[PASS] S3 bucket access (media/GREECE/)" in result.output
         assert "All checks passed" in result.output
+        mock_storage.upload_file.assert_called_once_with(
+            b"", "media/GREECE/__validate_check__", "text/plain"
+        )
+        mock_storage.delete_file.assert_called_once_with(
+            "media/GREECE/__validate_check__"
+        )
+
+    @patch("amplify_media_migrator.cli.GraphQLClient")
+    @patch("amplify_media_migrator.cli.AmplifyStorageClient")
+    @patch("amplify_media_migrator.cli._authenticate_cognito")
+    @patch("amplify_media_migrator.cli._authenticate_google")
+    @patch("amplify_media_migrator.cli._load_config")
+    def test_no_teams_fails_and_skips_s3(
+        self,
+        mock_load: MagicMock,
+        mock_auth_g: MagicMock,
+        mock_auth_c: MagicMock,
+        mock_storage_cls: MagicMock,
+        mock_gql_cls: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        mock_cfg = MagicMock()
+        mock_cfg.get.side_effect = lambda key: "test-value"
+        mock_load.return_value = mock_cfg
+        mock_drive = MagicMock()
+        mock_drive.list_files.return_value = iter([])
+        mock_auth_g.return_value = mock_drive
+        mock_auth_c.return_value = ("test-token", MagicMock())
+        mock_gql = MagicMock()
+        mock_gql.get_observation_by_sequential_id.return_value = None
+        mock_gql.list_team_slugs.return_value = []
+        mock_gql_cls.return_value = mock_gql
+
+        result = runner.invoke(main, ["validate", "--folder-id", "test-folder"])
+
+        assert result.exit_code == 1
+        assert "[FAIL] Teams: no Group records found" in result.output
+        assert "[SKIP] S3 bucket access" in result.output
+        mock_storage_cls.assert_not_called()
+
+    @patch("amplify_media_migrator.cli.GraphQLClient")
+    @patch("amplify_media_migrator.cli.AmplifyStorageClient")
+    @patch("amplify_media_migrator.cli._authenticate_cognito")
+    @patch("amplify_media_migrator.cli._authenticate_google")
+    @patch("amplify_media_migrator.cli._load_config")
+    def test_s3_write_denied_fails(
+        self,
+        mock_load: MagicMock,
+        mock_auth_g: MagicMock,
+        mock_auth_c: MagicMock,
+        mock_storage_cls: MagicMock,
+        mock_gql_cls: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        mock_cfg = MagicMock()
+        mock_cfg.get.side_effect = lambda key: "test-value"
+        mock_load.return_value = mock_cfg
+        mock_drive = MagicMock()
+        mock_drive.list_files.return_value = iter([])
+        mock_auth_g.return_value = mock_drive
+        mock_auth_c.return_value = ("test-token", MagicMock())
+        mock_storage = MagicMock()
+        mock_storage.upload_file.side_effect = Exception("AccessDenied")
+        mock_storage_cls.return_value = mock_storage
+        mock_gql = MagicMock()
+        mock_gql.list_team_slugs.return_value = ["ISRAEL"]
+        mock_gql_cls.return_value = mock_gql
+
+        result = runner.invoke(main, ["validate", "--folder-id", "test-folder"])
+
+        assert result.exit_code == 1
+        assert "[FAIL] S3 bucket access: AccessDenied" in result.output
 
     @patch("amplify_media_migrator.cli._load_config")
     def test_config_failure_exits_immediately(

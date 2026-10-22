@@ -45,13 +45,22 @@ def _drive_file(
     return DriveFile(id=file_id, name=name, mime_type=mime_type, size=size)
 
 
-def _observation(obs_id: str = "obs-1", seq_id: int = 6602) -> Observation:
-    return Observation(id=obs_id, sequential_id=seq_id)
+ISRAEL_GROUPS = ["ISRAEL_USER", "ISRAEL_ADMIN"]
+
+
+def _observation(
+    obs_id: str = "obs-1", seq_id: int = 6602, team: str = "ISRAEL"
+) -> Observation:
+    return Observation(
+        id=obs_id,
+        sequential_id=seq_id,
+        editor_groups=[f"{team}_USER", f"{team}_ADMIN"],
+    )
 
 
 def _media(
     media_id: str = "media-1",
-    url: str = "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/6602.jpg",
+    url: str = "media/ISRAEL/6602.jpg",
     obs_id: str = "obs-1",
 ) -> Media:
     return Media(
@@ -207,30 +216,26 @@ class TestProcessFileSingle:
 
         graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
         drive_client.download_file.return_value = b"photo bytes"
-        storage_client.upload_file.return_value = (
-            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/6602.jpg"
-        )
+        storage_client.upload_file.return_value = "media/ISRAEL/6602.jpg"
         graphql_client.create_media.return_value = media
 
         asyncio.run(engine.process_file(file))
 
         drive_client.download_file.assert_called_once_with("f1", ANY)
         storage_client.upload_file.assert_called_once_with(
-            b"photo bytes", "media/obs-1/6602.jpg", "image/jpeg", ANY
+            b"photo bytes", "media/ISRAEL/6602.jpg", "image/jpeg", ANY
         )
         graphql_client.create_media.assert_called_once_with(
-            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/6602.jpg",
+            "media/ISRAEL/6602.jpg",
             "obs-1",
             MediaType.IMAGE,
             False,
+            ISRAEL_GROUPS,
         )
 
         fp = progress.files["f1"]
         assert fp.status == FileStatus.COMPLETED
-        assert (
-            fp.s3_url
-            == "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/6602.jpg"
-        )
+        assert fp.s3_url == "media/ISRAEL/6602.jpg"
         assert fp.media_ids == ["media-1"]
         assert fp.observation_ids == ["obs-1"]
 
@@ -249,18 +254,17 @@ class TestProcessFileSingle:
 
         graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
         drive_client.download_file.return_value = b"video bytes"
-        storage_client.upload_file.return_value = (
-            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/6602.mp4"
-        )
+        storage_client.upload_file.return_value = "media/ISRAEL/6602.mp4"
         graphql_client.create_media.return_value = media
 
         asyncio.run(engine.process_file(file))
 
         graphql_client.create_media.assert_called_once_with(
-            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/6602.mp4",
+            "media/ISRAEL/6602.mp4",
             "obs-1",
             MediaType.VIDEO,
             False,
+            ISRAEL_GROUPS,
         )
 
 
@@ -280,15 +284,13 @@ class TestProcessFileMultiple:
 
         graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
         drive_client.download_file.return_value = b"photo bytes"
-        storage_client.upload_file.return_value = (
-            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/6602a.jpg"
-        )
+        storage_client.upload_file.return_value = "media/ISRAEL/6602a.jpg"
         graphql_client.create_media.return_value = media
 
         asyncio.run(engine.process_file(file))
 
         storage_client.upload_file.assert_called_once_with(
-            b"photo bytes", "media/obs-1/6602a.jpg", "image/jpeg", ANY
+            b"photo bytes", "media/ISRAEL/6602a.jpg", "image/jpeg", ANY
         )
         assert progress.files["f1"].status == FileStatus.COMPLETED
 
@@ -312,9 +314,7 @@ class TestProcessFileRange:
             6001: obs_b,
         }
         drive_client.download_file.return_value = b"photo"
-        storage_client.upload_file.return_value = (
-            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-a/6000-6001.jpg"
-        )
+        storage_client.upload_file.return_value = "media/ISRAEL/6000-6001.jpg"
         graphql_client.create_media.side_effect = [
             _media("m-a", obs_id="obs-a"),
             _media("m-b", obs_id="obs-b"),
@@ -348,9 +348,7 @@ class TestProcessFileRange:
             6001: obs_b,
         }
         drive_client.download_file.return_value = b"photo"
-        storage_client.upload_file.return_value = (
-            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-a/6000-6001.jpg"
-        )
+        storage_client.upload_file.return_value = "media/ISRAEL/6000-6001.jpg"
         graphql_client.create_media.side_effect = [
             _media("m-a", obs_id="obs-a"),
             GraphQLError("Server error", operation="CreateMedia"),
@@ -391,9 +389,7 @@ class TestProcessFileRange:
 
         graphql_client.get_observation_by_sequential_id.side_effect = slow_lookup
         drive_client.download_file.return_value = b"photo"
-        storage_client.upload_file.return_value = (
-            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-6000/6000-6001.jpg"
-        )
+        storage_client.upload_file.return_value = "media/ISRAEL/6000-6001.jpg"
         graphql_client.create_media.side_effect = [
             _media("m-a", obs_id="obs-6000"),
             _media("m-b", obs_id="obs-6001"),
@@ -417,9 +413,7 @@ class TestProcessFileRange:
 
         graphql_client.get_observations_by_sequential_ids.return_value = {6000: obs_a}
         drive_client.download_file.return_value = b"photo"
-        storage_client.upload_file.return_value = (
-            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-a/6000-6001.jpg"
-        )
+        storage_client.upload_file.return_value = "media/ISRAEL/6000-6001.jpg"
         graphql_client.create_media.return_value = _media("m-a", obs_id="obs-a")
 
         asyncio.run(engine.process_file(file))
@@ -521,9 +515,7 @@ class TestDuplicateCheck:
         graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
         graphql_client.get_media_observation_ids_by_url.return_value = set()
         drive_client.download_file.return_value = b"data"
-        storage_client.upload_file.return_value = (
-            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/6602.jpg"
-        )
+        storage_client.upload_file.return_value = "media/ISRAEL/6602.jpg"
         graphql_client.create_media.return_value = _media("m-1")
 
         asyncio.run(engine.process_file(file))
@@ -542,7 +534,7 @@ class TestResumeIdempotency:
         progress: ProgressTracker,
     ) -> None:
         progress.load("folder-1")
-        url = "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1000/1000-1001.jpg"
+        url = "media/ISRAEL/1000-1001.jpg"
         progress.update_file(
             "f1",
             "1000-1001.jpg",
@@ -580,7 +572,7 @@ class TestResumeIdempotency:
         progress: ProgressTracker,
     ) -> None:
         progress.load("folder-1")
-        url = "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1000/1000-1001.jpg"
+        url = "media/ISRAEL/1000-1001.jpg"
         progress.update_file(
             "f1",
             "1000-1001.jpg",
@@ -634,6 +626,146 @@ class TestResumeIdempotency:
         graphql_client.create_media.assert_not_called()
         assert progress.files["f1"].status == FileStatus.COMPLETED
 
+    def test_uploaded_at_current_key_skips_transfer(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        progress.update_file(
+            "f1",
+            "6602.jpg",
+            FileStatus.UPLOADED,
+            sequential_ids=[6602],
+            s3_url="media/ISRAEL/6602.jpg",
+        )
+        graphql_client.get_observations_by_sequential_ids.return_value = {
+            6602: _observation("obs-1", 6602)
+        }
+        graphql_client.create_media.return_value = _media("m-1")
+
+        asyncio.run(engine.process_file(_drive_file("f1", "6602.jpg")))
+
+        drive_client.download_file.assert_not_called()
+        storage_client.upload_file.assert_not_called()
+        assert graphql_client.create_media.call_args.args[0] == "media/ISRAEL/6602.jpg"
+        assert progress.files["f1"].status == FileStatus.COMPLETED
+
+    def test_uploaded_under_previous_team_is_reuploaded(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        progress.update_file(
+            "f1",
+            "6602.jpg",
+            FileStatus.UPLOADED,
+            sequential_ids=[6602],
+            s3_url="media/ISRAEL/6602.jpg",
+        )
+        graphql_client.get_observations_by_sequential_ids.return_value = {
+            6602: _observation("obs-1", 6602, team="GREECE")
+        }
+        drive_client.download_file.return_value = b"photo bytes"
+        graphql_client.create_media.return_value = _media("m-1")
+
+        asyncio.run(engine.process_file(_drive_file("f1", "6602.jpg")))
+
+        storage_client.upload_file.assert_called_once_with(
+            b"photo bytes", "media/GREECE/6602.jpg", "image/jpeg", ANY
+        )
+        create_args = graphql_client.create_media.call_args.args
+        assert create_args[0] == "media/GREECE/6602.jpg"
+        assert create_args[4] == ["GREECE_USER", "GREECE_ADMIN"]
+        assert progress.files["f1"].s3_url == "media/GREECE/6602.jpg"
+
+
+class TestTeamScoping:
+    def test_observation_without_team_fails_without_upload(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        graphql_client.get_observations_by_sequential_ids.return_value = {
+            6602: Observation(id="obs-1", sequential_id=6602)
+        }
+
+        asyncio.run(engine.process_file(_drive_file("f1", "6602.jpg")))
+
+        drive_client.download_file.assert_not_called()
+        storage_client.upload_file.assert_not_called()
+        fp = progress.files["f1"]
+        assert fp.status == FileStatus.FAILED
+        assert fp.error is not None
+        assert "no resolvable team" in fp.error
+        assert "6602" in fp.error
+
+    def test_observations_in_different_teams_fail_without_upload(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        graphql_client.get_observations_by_sequential_ids.return_value = {
+            6000: _observation("obs-a", 6000, team="ISRAEL"),
+            6001: _observation("obs-b", 6001, team="GREECE"),
+        }
+
+        asyncio.run(engine.process_file(_drive_file("f1", "6000-6001.jpg")))
+
+        drive_client.download_file.assert_not_called()
+        storage_client.upload_file.assert_not_called()
+        fp = progress.files["f1"]
+        assert fp.status == FileStatus.FAILED
+        assert fp.error is not None
+        assert "span multiple teams: GREECE, ISRAEL" in fp.error
+
+    def test_media_uses_bare_team_key_and_editor_groups(
+        self,
+        engine: MigrationEngine,
+        drive_client: MagicMock,
+        storage_client: MagicMock,
+        graphql_client: MagicMock,
+        progress: ProgressTracker,
+    ) -> None:
+        progress.load("folder-1")
+        graphql_client.get_observations_by_sequential_ids.return_value = {
+            6602: _observation("obs-1", 6602, team="GREECE")
+        }
+        drive_client.download_file.return_value = b"photo bytes"
+        storage_client.upload_file.return_value = (
+            "https://bucket.s3.us-east-1.amazonaws.com/media/GREECE/6602.jpg"
+        )
+        graphql_client.create_media.return_value = _media("m-1")
+
+        asyncio.run(engine.process_file(_drive_file("f1", "6602.jpg")))
+
+        graphql_client.get_media_observation_ids_by_url.assert_called_once_with(
+            "media/GREECE/6602.jpg"
+        )
+        graphql_client.create_media.assert_called_once_with(
+            "media/GREECE/6602.jpg",
+            "obs-1",
+            MediaType.IMAGE,
+            False,
+            ["GREECE_USER", "GREECE_ADMIN"],
+        )
+        assert progress.files["f1"].s3_url == "media/GREECE/6602.jpg"
+
 
 class TestUrlCache:
     def test_populate_cache_from_completed_files(
@@ -666,9 +798,7 @@ class TestUrlCache:
         file = _drive_file("f1", "6602.jpg")
         obs = _observation("obs-1", 6602)
         graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
-        engine._uploaded_urls.add(
-            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/6602.jpg"
-        )
+        engine._uploaded_urls.add("media/ISRAEL/6602.jpg")
 
         asyncio.run(engine.process_file(file))
 
@@ -677,10 +807,7 @@ class TestUrlCache:
         fp = progress.files["f1"]
         assert fp.status == FileStatus.COMPLETED
         assert fp.observation_ids == ["obs-1"]
-        assert (
-            fp.s3_url
-            == "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/6602.jpg"
-        )
+        assert fp.s3_url == "media/ISRAEL/6602.jpg"
 
     def test_calls_duplicate_check_when_url_not_cached(
         self,
@@ -696,9 +823,7 @@ class TestUrlCache:
         graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
         graphql_client.get_media_observation_ids_by_url.return_value = set()
         drive_client.download_file.return_value = b"data"
-        storage_client.upload_file.return_value = (
-            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/6602.jpg"
-        )
+        storage_client.upload_file.return_value = "media/ISRAEL/6602.jpg"
         graphql_client.create_media.return_value = _media("m-1")
 
         asyncio.run(engine.process_file(file))
@@ -716,7 +841,7 @@ class TestUrlCache:
         progress.load("folder-1")
         file = _drive_file("f1", "6602.jpg")
         obs = _observation("obs-1", 6602)
-        url = "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/6602.jpg"
+        url = "media/ISRAEL/6602.jpg"
         graphql_client.get_observations_by_sequential_ids.return_value = {6602: obs}
         graphql_client.get_media_observation_ids_by_url.return_value = set()
         drive_client.download_file.return_value = b"data"
@@ -1138,11 +1263,11 @@ class TestTokenExpiryRecovery:
         drive_client.open_download_stream.return_value = MagicMock()
         storage_client.upload_file_stream.side_effect = [
             UploadError("token expired", is_token_expired=True),
-            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/789.jpg",
+            "media/ISRAEL/789.jpg",
         ]
         graphql_client.create_media.return_value = _media(
             "m-1",
-            url="https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/789.jpg",
+            url="media/ISRAEL/789.jpg",
         )
 
         asyncio.run(engine.process_file(file))
@@ -1952,10 +2077,11 @@ class TestEdgeCases:
         asyncio.run(engine.process_file(file))
 
         graphql_client.create_media.assert_called_once_with(
-            "https://bucket/media/obs-1/6602.jpg",
+            "media/ISRAEL/6602.jpg",
             "obs-1",
             MediaType.IMAGE,
             True,
+            ISRAEL_GROUPS,
         )
 
     def test_duplicate_check_query_error_falls_through(
@@ -2340,9 +2466,7 @@ class TestProcessFileStreaming:
             123: _observation("obs-1", 123)
         }
         drive_client.download_file.return_value = b"photo bytes"
-        storage_client.upload_file.return_value = (
-            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-1/123.jpg"
-        )
+        storage_client.upload_file.return_value = "media/ISRAEL/123.jpg"
         graphql_client.create_media.return_value = _media("media-1")
 
         asyncio.run(streaming_engine.process_file(file))
@@ -2366,12 +2490,10 @@ class TestProcessFileStreaming:
         }
         storage_client.open_download_stream = MagicMock()
         drive_client.open_download_stream.return_value = MagicMock()
-        storage_client.upload_file_stream.return_value = (
-            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-2/456.mp4"
-        )
+        storage_client.upload_file_stream.return_value = "media/ISRAEL/456.mp4"
         graphql_client.create_media.return_value = _media(
             "media-2",
-            url="https://bucket.s3.us-east-1.amazonaws.com/media/obs-2/456.mp4",
+            url="media/ISRAEL/456.mp4",
             obs_id="obs-2",
         )
 
@@ -2384,9 +2506,7 @@ class TestProcessFileStreaming:
 
         fp = progress.files["f2"]
         assert fp.status == FileStatus.COMPLETED
-        assert (
-            fp.s3_url == "https://bucket.s3.us-east-1.amazonaws.com/media/obs-2/456.mp4"
-        )
+        assert fp.s3_url == "media/ISRAEL/456.mp4"
 
     def test_unknown_size_uses_streaming_path(
         self,
@@ -2405,12 +2525,10 @@ class TestProcessFileStreaming:
             789: _observation("obs-3", 789)
         }
         drive_client.open_download_stream.return_value = MagicMock()
-        storage_client.upload_file_stream.return_value = (
-            "https://bucket.s3.us-east-1.amazonaws.com/media/obs-3/789.jpg"
-        )
+        storage_client.upload_file_stream.return_value = "media/ISRAEL/789.jpg"
         graphql_client.create_media.return_value = _media(
             "media-3",
-            url="https://bucket.s3.us-east-1.amazonaws.com/media/obs-3/789.jpg",
+            url="media/ISRAEL/789.jpg",
             obs_id="obs-3",
         )
 

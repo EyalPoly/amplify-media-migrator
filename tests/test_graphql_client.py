@@ -213,6 +213,34 @@ class TestGetObservationBySequentialId:
         assert result == Observation(id="obs-123", sequential_id=6602)
 
     @patch("requests.Session.post")
+    def test_reads_editor_groups(
+        self, mock_post: MagicMock, connected_client: GraphQLClient
+    ) -> None:
+        mock_post.return_value = _make_response(
+            json_data={
+                "data": {
+                    "listObservations": {
+                        "items": [
+                            {
+                                "id": "obs-123",
+                                "sequentialId": 6602,
+                                "editorGroups": ["ISRAEL_USER", None, "ISRAEL_ADMIN"],
+                            }
+                        ]
+                    }
+                }
+            }
+        )
+
+        result = connected_client.get_observation_by_sequential_id(6602)
+
+        assert result is not None
+        assert result.editor_groups == ["ISRAEL_USER", "ISRAEL_ADMIN"]
+        assert result.team_slug == "ISRAEL"
+        query = mock_post.call_args.kwargs["json"]["query"]
+        assert "editorGroups" in query
+
+    @patch("requests.Session.post")
     def test_returns_none_when_not_found(
         self, mock_post: MagicMock, connected_client: GraphQLClient
     ) -> None:
@@ -469,7 +497,129 @@ class TestListObservationsWithoutMedia:
         assert result == []
 
 
+class TestObservationTeamSlug:
+    def test_team_from_user_and_admin_groups(self) -> None:
+        obs = Observation("o", 1, editor_groups=["GREECE_USER", "GREECE_ADMIN"])
+        assert obs.team_slug == "GREECE"
+
+    def test_single_role_group_is_enough(self) -> None:
+        assert Observation("o", 1, editor_groups=["ISRAEL_ADMIN"]).team_slug == "ISRAEL"
+
+    def test_no_groups_has_no_team(self) -> None:
+        assert Observation("o", 1).team_slug is None
+
+    def test_groups_of_two_teams_are_ambiguous(self) -> None:
+        obs = Observation("o", 1, editor_groups=["ISRAEL_USER", "GREECE_ADMIN"])
+        assert obs.team_slug is None
+
+    def test_non_team_groups_are_ignored(self) -> None:
+        obs = Observation("o", 1, editor_groups=["SUPER_ADMINS", "ISRAEL_USER"])
+        assert obs.team_slug == "ISRAEL"
+
+
+class TestListTeamSlugs:
+    @patch("requests.Session.post")
+    def test_uses_slug_and_falls_back_to_upper_cased_name(
+        self, mock_post: MagicMock, connected_client: GraphQLClient
+    ) -> None:
+        mock_post.side_effect = [
+            _make_response(
+                json_data={
+                    "data": {
+                        "listGroups": {
+                            "items": [{"name": "Israel", "slug": "ISRAEL"}],
+                            "nextToken": "page-2",
+                        }
+                    }
+                }
+            ),
+            _make_response(
+                json_data={
+                    "data": {
+                        "listGroups": {
+                            "items": [
+                                {"name": " Greece ", "slug": None},
+                                {"name": None, "slug": None},
+                            ],
+                            "nextToken": None,
+                        }
+                    }
+                }
+            ),
+        ]
+
+        assert connected_client.list_team_slugs() == ["GREECE", "ISRAEL"]
+        second_vars = mock_post.call_args_list[1].kwargs["json"]["variables"]
+        assert second_vars == {"nextToken": "page-2"}
+
+    @patch("requests.Session.post")
+    def test_empty_when_no_groups(
+        self, mock_post: MagicMock, connected_client: GraphQLClient
+    ) -> None:
+        mock_post.return_value = _make_response(
+            json_data={"data": {"listGroups": {"items": [], "nextToken": None}}}
+        )
+
+        assert connected_client.list_team_slugs() == []
+
+
 class TestCreateMedia:
+    @patch("requests.Session.post")
+    def test_sends_editor_groups_when_given(
+        self, mock_post: MagicMock, connected_client: GraphQLClient
+    ) -> None:
+        mock_post.return_value = _make_response(
+            json_data={
+                "data": {
+                    "createMedia": {
+                        "id": "media-1",
+                        "url": "media/ISRAEL/photo.jpg",
+                        "observationId": "obs-1",
+                        "type": "PHOTO",
+                        "isAvailableForPublicUse": False,
+                    }
+                }
+            }
+        )
+
+        connected_client.create_media(
+            url="media/ISRAEL/photo.jpg",
+            observation_id="obs-1",
+            media_type=MediaType.IMAGE,
+            editor_groups=["ISRAEL_USER", "ISRAEL_ADMIN"],
+        )
+
+        media_input = mock_post.call_args.kwargs["json"]["variables"]["input"]
+        assert media_input["url"] == "media/ISRAEL/photo.jpg"
+        assert media_input["editorGroups"] == ["ISRAEL_USER", "ISRAEL_ADMIN"]
+
+    @patch("requests.Session.post")
+    def test_omits_editor_groups_when_not_given(
+        self, mock_post: MagicMock, connected_client: GraphQLClient
+    ) -> None:
+        mock_post.return_value = _make_response(
+            json_data={
+                "data": {
+                    "createMedia": {
+                        "id": "media-1",
+                        "url": "media/ISRAEL/photo.jpg",
+                        "observationId": "obs-1",
+                        "type": "PHOTO",
+                        "isAvailableForPublicUse": False,
+                    }
+                }
+            }
+        )
+
+        connected_client.create_media(
+            url="media/ISRAEL/photo.jpg",
+            observation_id="obs-1",
+            media_type=MediaType.IMAGE,
+        )
+
+        media_input = mock_post.call_args.kwargs["json"]["variables"]["input"]
+        assert "editorGroups" not in media_input
+
     @patch("requests.Session.post")
     def test_creates_image_media(
         self, mock_post: MagicMock, connected_client: GraphQLClient

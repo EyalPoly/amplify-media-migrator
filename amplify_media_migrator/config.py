@@ -27,6 +27,7 @@ class CognitoConfig:
     client_id: str = ""
     identity_pool_id: str = ""
     username: str = ""
+    admin_group_name: str = "SUPER_ADMINS"
 
 
 @dataclass
@@ -143,6 +144,8 @@ def config_from_dict(data: dict) -> Config:
         client_id=cognito_data.get("client_id", ""),
         identity_pool_id=cognito_data.get("identity_pool_id", ""),
         username=cognito_data.get("username", ""),
+        admin_group_name=cognito_data.get("admin_group_name")
+        or CognitoConfig.admin_group_name,
     )
 
     amplify_data = aws_data.get("amplify", {})

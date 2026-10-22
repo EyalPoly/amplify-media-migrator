@@ -162,6 +162,7 @@ def _authenticate_cognito(cfg: ConfigManager) -> tuple[str, Any]:
         user_pool_id=cfg.get("aws.cognito.user_pool_id"),
         client_id=cfg.get("aws.cognito.client_id"),
         region=cfg.get("aws.region"),
+        admin_group_name=cfg.get("aws.cognito.admin_group_name"),
     )
 
     username = cfg.get("aws.cognito.username")
@@ -599,25 +600,8 @@ def validate(folder_id: str) -> None:
         click.echo("[FAIL] Cognito authentication")
         failed = True
 
-    # 5. S3 bucket access
-    if cognito_ok:
-        try:
-            storage_client = AmplifyStorageClient(
-                bucket=cfg.get("aws.amplify.storage_bucket"),
-                region=cfg.get("aws.region"),
-                identity_pool_id=cfg.get("aws.cognito.identity_pool_id"),
-                user_pool_id=cfg.get("aws.cognito.user_pool_id"),
-            )
-            storage_client.connect(id_token)
-            storage_client.file_exists("media/__validate_check__")
-            click.echo("[PASS] S3 bucket access")
-        except Exception as e:
-            click.echo(f"[FAIL] S3 bucket access: {e}")
-            failed = True
-    else:
-        click.echo("[SKIP] S3 bucket access")
-
-    # 6. GraphQL endpoint
+    # 5. GraphQL endpoint and teams
+    team_slugs: List[str] = []
     if cognito_ok:
         try:
             graphql_client = GraphQLClient(
@@ -627,11 +611,37 @@ def validate(folder_id: str) -> None:
             graphql_client.connect(id_token)
             graphql_client.get_observation_by_sequential_id(0)
             click.echo("[PASS] GraphQL endpoint")
+            team_slugs = graphql_client.list_team_slugs()
+            if team_slugs:
+                click.echo(f"[PASS] Teams: {', '.join(team_slugs)}")
+            else:
+                click.echo("[FAIL] Teams: no Group records found")
+                failed = True
         except Exception as e:
             click.echo(f"[FAIL] GraphQL endpoint: {e}")
             failed = True
     else:
         click.echo("[SKIP] GraphQL endpoint")
+
+    # 6. S3 write access — storage is only granted under a team's media/<TEAM>/ prefix
+    if cognito_ok and team_slugs:
+        probe_key = f"media/{team_slugs[0]}/__validate_check__"
+        try:
+            storage_client = AmplifyStorageClient(
+                bucket=cfg.get("aws.amplify.storage_bucket"),
+                region=cfg.get("aws.region"),
+                identity_pool_id=cfg.get("aws.cognito.identity_pool_id"),
+                user_pool_id=cfg.get("aws.cognito.user_pool_id"),
+            )
+            storage_client.connect(id_token)
+            storage_client.upload_file(b"", probe_key, "text/plain")
+            storage_client.delete_file(probe_key)
+            click.echo(f"[PASS] S3 bucket access (media/{team_slugs[0]}/)")
+        except Exception as e:
+            click.echo(f"[FAIL] S3 bucket access: {e}")
+            failed = True
+    else:
+        click.echo("[SKIP] S3 bucket access")
 
     if failed:
         click.echo("\nValidation failed.")
